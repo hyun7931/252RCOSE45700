@@ -1,0 +1,179 @@
+/* frontend/src/index.css */
+:root {
+  --cs-message-input__background-color: #f4f4f4;
+  --cs-message-input__content-editor-background-color: transparent;
+}
+
+/* 1. 기본 설정*/
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: #ffffff;
+  color: #333;
+}
+
+.chat-title {
+  width: 100%;
+  max-width: 900px;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 10px;
+  padding-left: 4px;
+}
+
+.app-container {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  box-sizing: border-box;
+  flex-direction: column;
+}
+.cs-main-container {
+  border: none !important;
+  width: 100%;
+  max-width: 900px;
+  height: 100%;
+  max-height: 95vh;
+}
+
+.cs-message-list {
+  padding-bottom: 20px;
+}
+
+/* 2. 말풍선 */
+.cs-message--outgoing .cs-message__content {
+  background-color: #f4f4f4 !important;
+  color: #000000 !important;
+  border-radius: 20px !important;
+  padding: 12px 16px !important;
+  box-shadow: none !important;
+  border: 1px solid #e5e5e5;
+}
+
+.cs-message--incoming .cs-message__content {
+  background-color: #ffffff !important;
+  color: #333333 !important;
+  border: none !important;
+  padding: 10px 0 !important;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* 3. MessageInput */
+.cs-message-input {
+  background-color: #f4f4f4 !important;
+  border: 1px solid #e5e5e5;
+  border-radius: 20px;
+  padding: 8px 16px;
+  margin: 0 20px 20px 20px;
+  box-shadow: none !important;
+  display: flex;
+  align-items: center;
+}
+
+.cs-message-input__content-editor-wrapper,
+.cs-message-input__content-editor-wrapper * {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.cs-message-input__content-editor-wrapper {
+  padding: 0 !important;
+}
+
+/* 4. 랜딩 페이지 */
+.landing-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  max-width: 600px;
+
+  margin: 0 auto;
+  padding: 20px;
+  text-align: center;
+}
+
+.landing-header {
+  margin-bottom: 40px;
+}
+
+.landing-icon {
+  font-size: 3rem;
+  margin-bottom: 10px;
+}
+
+.landing-header h2 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: #000;
+  margin: 0;
+}
+
+.suggestion-section {
+  width: 100%;
+}
+
+.suggestion-label {
+  font-size: 0.9rem;
+  color: #888;
+  margin-bottom: 15px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.suggestion-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 16px 20px;
+  background-color: #ffffff;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  color: #333;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.suggestion-btn:hover {
+  background-color: #f9f9f9;
+  border-color: #d0d0d0;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+
+.arrow-icon {
+  color: #ccc;
+  font-weight: 300;
+}
+
+.cs-message-input__content-editor-wrapper {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.cs-message-input__content-editor {
+  padding: 4px 0 !important;
+  margin: 0 !important;
+  line-height: 1.4 !important;
+}
