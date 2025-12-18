@@ -133,13 +133,21 @@ LIBO는 고객 소득·부채·신용 데이터를 기반으로 실제 **DSR·LT
 <img width="1494" height="571" alt="image" src="https://github.com/user-attachments/assets/5080c287-2c5a-4cf1-a795-e250a15182da" />
 
 * 지식 구축 파이프라인
-문서 (PDF, TXT) 
-→ Chunking 
-    - RecursiveCharacterTextSplitter
-    - 1000 / 200 overlap
-→ Embedding
-    - openAI Embedding
-→ chromaDB 저장 
+  문서 (PDF, TXT) 
+  → Chunking 
+      - RecursiveCharacterTextSplitter
+      - 1000 / 200 overlap
+  → Embedding
+      - openAI Embedding
+  → chromaDB 저장
+
+* 검색 및 답변 파이프라인
+  사용자 질문
+  → OpenAI Embedding
+  → 유사도 검색
+  → prompt 통합
+  → openAI GPT-4o-mini
+  → 답변 생성
 
 ---
 
