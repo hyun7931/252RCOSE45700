@@ -129,6 +129,10 @@ LIBO는 고객 소득·부채·신용 데이터를 기반으로 실제 **DSR·LT
 | **Infra** | Docker, AWS EC2, AWS S3 |
 
 ---
+## 🤖 아키텍처
+<img width="1494" height="571" alt="image" src="https://github.com/user-attachments/assets/5080c287-2c5a-4cf1-a795-e250a15182da" />
+
+---
 
 ## 🖥️ 향후 개발 예정 (TODO)
 - [ ] Oracle DB 관련 수정 및 연동 (고객 실데이터 기반 심사)
@@ -136,6 +140,7 @@ LIBO는 고객 소득·부채·신용 데이터를 기반으로 실제 **DSR·LT
 - [ ] RAG 성능 평가와 품질 개선
 - [ ] LLM 캐싱
 - [ ] 프론트엔드 UI 개선
+
 
 ---
 
