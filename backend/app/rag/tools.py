@@ -32,6 +32,9 @@ class CalculatorInput(BaseModel):
     has_payroll: Optional[bool] = Field(description="당행 급여이체 여부. 모르면 비워둘 것 (기본: 없음)", default=None)
     auto_transfers: Optional[int] = Field(description="당행 자동이체 건수. 모르면 비워둘 것 (기본: 0건)", default=None)
     asset_amount: Optional[int] = Field(description="보유 자산 합계 (부동산+예금, 단위: 원). 모르면 비워둘 것 (기본: 0원)", default=None)
+    collateral_value: Optional[int] = Field(description="[주택담보대출 필수] 담보 주택 가액 (단위: 원). 모르면 비워둘 것", default=None)
+    region: Optional[str] = Field(description="[주택담보대출 필수] 담보 주택 지역 구분 (speculative:투기과열지구, adjusted:조정대상지역, normal:기타 일반지역). 모르면 비워둘 것", default=None)
+    is_actual_demand: Optional[bool] = Field(description="[주택담보대출] 실수요자 요건 충족 여부. 모르면 비워둘 것 (기본: 아님)", default=None)
 
 #Tool1. 심사 계산기
 @tool("loan_calculator", args_schema=CalculatorInput)
@@ -49,12 +52,20 @@ def loan_calculator(
     stress_rate_increase: Optional[float] = None,
     has_payroll: Optional[bool] = None,
     auto_transfers: Optional[int] = None,
-    asset_amount: Optional[int] = None
+    asset_amount: Optional[int] = None,
+    collateral_value: Optional[int] = None,
+    region: Optional[str] = None,
+    is_actual_demand: Optional[bool] = None
 ):
     """
     고객의 재무 정보를 바탕으로 DSR, 내부 등급(CSS), 대출 승인 여부, 전결 권한, 금리 상승 시 DSR을 계산하는 시뮬레이터입니다.
     구체적인 수치 계산(DSR %)이나 '승인/거절' 판단, 금리 상승 시뮬레이션이 필요할 때 반드시 이 도구를 사용하세요.
     """
+    if product_type == "mortgage":
+        missing = [label for value, label in [(collateral_value, "담보 주택 가액"), (region, "지역 구분(투기과열지구/조정대상지역/일반지역)")] if not value]
+        if missing:
+            return f"[필수 정보 누락] 주택담보대출 심사에는 {', '.join(missing)}이(가) 필요합니다. 계산하지 말고 사용자에게 먼저 물어보세요."
+
     assumed = []
     def pick(value, default, label):
         if value is None:
@@ -85,6 +96,14 @@ def loan_calculator(
         "stress_rate_increase": stress / 100,
         "product_type": product_type
     }
+    if product_type == "mortgage":
+        # 실수요자 여부는 투기과열지구에서만 LTV에 영향
+        actual_demand = pick(is_actual_demand, False, "실수요자 아님") if region == "speculative" else bool(is_actual_demand)
+        loan_request.update({
+            "collateral_value": collateral_value,
+            "region": region,
+            "is_actual_demand": actual_demand
+        })
 
     try:
         result = engine.run_simulation(user_data, loan_request, user_role)
@@ -97,6 +116,8 @@ def loan_calculator(
             "보유 자산": f"{assets:,}원",
             "기본값 적용 항목": assumed or "없음",
         }
+        if product_type == "mortgage":
+            result["applied_conditions"]["담보 주택 가액"] = f"{collateral_value:,}원"
         return result
     except Exception as e:
         return f"계산 중 오류 발생: {str(e)}"
