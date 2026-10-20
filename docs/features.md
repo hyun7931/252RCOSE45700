@@ -1,6 +1,6 @@
 # LIBO 기능 정리
 
-LIBO는 디디은행 여신 심사역을 돕는 챗봇입니다. 사용자가 자연어로 질문하면 LangChain 에이전트(OpenAI `gpt-4o-mini`)가 질문 의도를 파악해 아래 두 도구 중 필요한 것을 호출하고, 결과를 근거(출처)와 함께 답변합니다.
+LIBO는 디디은행 여신 심사역을 돕는 챗봇입니다. 사용자가 자연어로 질문하면 LangChain 에이전트(Gemini 또는 OpenAI 모델)가 질문 의도를 파악해 아래 두 도구 중 필요한 것을 호출하고, 결과를 근거(출처)와 함께 답변합니다.
 
 | 도구 | 역할 | 구현 |
 |------|------|------|
@@ -104,7 +104,7 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
    - `guidelines` → `guideline`
    - 그 외 → `general`
 3. 1000자 단위, 200자 겹침으로 나눕니다.
-4. OpenAI Embedding으로 임베딩해 ChromaDB(`backend/data/chromadb_storage/`)에 저장합니다.
+4. 선택한 provider의 임베딩 모델로 임베딩해 ChromaDB(`backend/data/chromadb_storage/`)에 저장합니다.
 
 ### 검색
 
@@ -119,7 +119,23 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 | 내부 규정 | 디디 내부심사규정 |
 | 상품 | 디디 새희망홀씨2, 디디 자동차담보대출, 디디 주택담보대출, 디디 직장인대출(인터넷뱅킹) |
 
-## 4. 채팅 화면 (Frontend)
+## 4. LLM Provider 선택
+
+- 위치: `backend/app/llm_provider.py`
+- `.env`의 `LLM_PROVIDER` 값으로 채팅 모델과 임베딩 모델을 함께 고릅니다. 기본값은 `gemini`입니다.
+
+| `LLM_PROVIDER` | 채팅 모델 (기본값) | 임베딩 모델 (기본값) | 필요한 키 |
+|------|------|------|------|
+| `gemini` | `GEMINI_CHAT_MODEL` (`gemini-2.5-flash`) | `GEMINI_EMBEDDING_MODEL` (`models/gemini-embedding-001`) | `GOOGLE_API_KEY` |
+| `openai` | `OPENAI_CHAT_MODEL` (`gpt-4o-mini`) | `OPENAI_EMBEDDING_MODEL` (`text-embedding-ada-002`) | `OPENAI_API_KEY` |
+
+- `EMBEDDING_PROVIDER`를 따로 지정하면 임베딩만 다른 provider를 씁니다(예: 채팅은 Gemini, 임베딩은 OpenAI). 비워 두면 `LLM_PROVIDER`를 따라갑니다. 검색할 때도 벡터 DB를 만들 때와 같은 임베딩 provider를 써야 합니다.
+- 벡터 DB를 만들 때 임베딩 요청을 `EMBED_BATCH_SIZE`개(기본 30)씩 나누고 묶음 사이에 `EMBED_BATCH_DELAY`초(기본 60)를 쉽니다. Gemini 무료 등급의 분당 한도 때문이며, 한도가 넉넉하면 0으로 둡니다.
+- 목록에 없는 값이면 사용 가능한 provider 목록과 함께 오류를 냅니다.
+- 새 provider는 `PROVIDERS`에 (채팅 모델, 임베딩) 생성 함수를 등록하면 추가됩니다.
+- 임베딩 provider를 바꾸면 벡터 차원이 달라지므로 벡터 DB를 다시 만들어야 합니다.
+
+## 5. 채팅 화면 (Frontend)
 
 - 위치: `frontend/src/App.jsx` (React 17 + Vite, `@chatscope/chat-ui-kit-react`)
 - 대화가 없을 때 추천 질문 카드 4개를 보여주고, 누르면 바로 질문이 전송됩니다.
@@ -130,7 +146,7 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 - 답변을 기다리는 동안 "디디봇이 생각 중입니다..." 표시
 - 서버 연결 실패 시 "⚠️ 서버 연결에 실패했습니다." 표시
 
-## 5. API
+## 6. API
 
 ### `POST /chat`
 

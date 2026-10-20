@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-LIBO (Loan Intelligence Banking Officer) — a hybrid loan-underwriting assistant chatbot for a fictional bank "디디은행 (DiDi Bank)". It combines a **deterministic calculation engine** (DSR, CSS grade, approval authority, rate stress test) with **RAG over regulation/product documents** (ChromaDB), orchestrated by a LangChain tool-calling agent on OpenAI `gpt-4o-mini`. User-facing text, prompts, and data are in Korean.
+LIBO (Loan Intelligence Banking Officer) — a hybrid loan-underwriting assistant chatbot for a fictional bank "디디은행 (DiDi Bank)". It combines a **deterministic calculation engine** (DSR, CSS grade, approval authority, rate stress test) with **RAG over regulation/product documents** (ChromaDB), orchestrated by a LangChain tool-calling agent. The LLM/embedding provider (Gemini or OpenAI) is selected by `LLM_PROVIDER`. User-facing text, prompts, and data are in Korean.
 
 ## Commands
 
-Backend (run from `backend/`; imports are `app.*`, so the working directory must be `backend/`). Requires `OPENAI_API_KEY` in `backend/.env` (loaded via python-dotenv; copy from `backend/.env.example`).
+Backend (run from `backend/`; imports are `app.*`, so the working directory must be `backend/`). Requires `backend/.env` (copy from `backend/.env.example`): `LLM_PROVIDER` plus that provider's API key (`GOOGLE_API_KEY` or `OPENAI_API_KEY`). Use a Python 3.11 venv on Windows: `chroma-hnswlib` has no prebuilt 3.12 wheel there.
 
 ```bash
 pip install -r requirements.txt
@@ -44,7 +44,8 @@ Request flow: `frontend/src/App.jsx` → `POST /chat {message, history}` → `ba
 - **System prompt** (`rag/chatbot.py`) defines the agent's behavior: ask for missing inputs (income, credit score, existing repayment, loan amount, job years, product type) before calling the calculator, and always end answers with a `[출처: ...]` citation.
 - **`loan_calculator` tool** wraps `logic/loan_engine.py:LoanReviewEngine.run_simulation`. Several inputs are hardcoded in the tool, not taken from the user: `rate=0.05`, `term=5` years, `has_payroll=True`, `auto_transfers=3`. `user_role` (staff/manager/hq) defaults to `manager`. The stress test is always +2%p.
 - **`LoanReviewEngine`** encodes the internal rules from `data/regulations/internal_rules/디디 내부심사규정.txt`: CSS score (credit 40 + income 30 + transaction 20 + job stability 10 → grade 1–5), DSR via level-payment amortization, and approval authority levels (0 auto-approve / 1 branch manager / 2 HQ / 99 reject). If you change thresholds here, keep them consistent with that regulation text (and vice versa), since the RAG side cites the document while the engine computes the numbers.
-- **`regulatory_search` tool** uses `rag/vector_store.py:get_retriever` (similarity, k=4). Indexing walks `backend/data/regulations/` recursively, loads `.pdf` (PyPDFLoader) and `.txt` (UTF-8 TextLoader), chunks 1000/200, embeds with `OpenAIEmbeddings`, and stores `source_file` + `category` metadata. Category is derived from the folder name (`internal_rules`, `products`, `guidelines`, else `general`).
+- **`regulatory_search` tool** uses `rag/vector_store.py:get_retriever` (similarity, k=4). Indexing walks `backend/data/regulations/` recursively, loads `.pdf` (PyPDFLoader) and `.txt` (UTF-8 TextLoader), chunks 1000/200, embeds with the configured provider's embeddings, and stores `source_file` + `category` metadata. Category is derived from the folder name (`internal_rules`, `products`, `guidelines`, else `general`).
+- **`app/llm_provider.py`** is the only place chat/embedding models are constructed. `get_chat_model()` dispatches on `LLM_PROVIDER` and `get_embeddings()` on `EMBEDDING_PROVIDER` (falls back to `LLM_PROVIDER`) via the `PROVIDERS` registry; model names come from `GEMINI_*` / `OPENAI_*` env vars. The embedding provider at query time must match the one that built the vector DB (dimensions differ); changing it requires a rebuild. Indexing embeds in batches (`EMBED_BATCH_SIZE`, `EMBED_BATCH_DELAY`) to stay under Gemini free-tier per-minute limits. `langchain-google-genai` is pinned to 2.0.7, the newest release compatible with `langchain-core==0.3.25`.
 - `tools.py` instantiates the engine and retriever at import time, and `chatbot.py` silently falls back to `tools = []` on `ImportError`.
 
 ## Gotchas

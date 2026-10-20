@@ -124,7 +124,7 @@ LIBO는 고객 소득·부채·신용 데이터를 기반으로 실제 **DSR·LT
 |------|------|
 | **Frontend** | React, Vite |
 | **Backend** | FastAPI, Python |
-| **AI / LLM** | LangChain, OpenAI GPT-4o-mini |
+| **AI / LLM** | LangChain, Google Gemini / OpenAI (`LLM_PROVIDER`로 선택) |
 | **Vector DB** | ChromaDB |
 | **Infra** | Docker, AWS EC2, AWS S3 |
 
@@ -139,16 +139,16 @@ LIBO는 고객 소득·부채·신용 데이터를 기반으로 실제 **DSR·LT
       - RecursiveCharacterTextSplitter
       - 1000 / 200 overlap
   → Embedding
-      - openAI Embedding
+      - Gemini / OpenAI Embedding
   → chromaDB 저장
 
 * **검색 및 답변 파이프라인**
   
   사용자 질문
-  → OpenAI Embedding
+  → Embedding (Gemini / OpenAI)
   → 유사도 검색
   → prompt 통합
-  → openAI GPT-4o-mini
+  → LLM (Gemini / OpenAI)
   → 답변 생성
 
 ---

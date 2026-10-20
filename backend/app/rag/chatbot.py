@@ -1,7 +1,7 @@
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+from app.llm_provider import get_chat_model
 from dotenv import load_dotenv
 import os
 
@@ -13,7 +13,7 @@ except ImportError:
     print("경고 : Tools를 찾을 수 없습니다.")
     tools = []
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = get_chat_model()
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """
