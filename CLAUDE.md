@@ -15,6 +15,8 @@ pip install -r requirements.txt
 python -m app.rag.vector_store      # (re)build the vector DB — deletes and recreates data/chromadb_storage/
 uvicorn app.main:app --reload --port 8000
 python -m app.logic.loan_engine     # ad-hoc sanity check of the engine (manager vs hq authority)
+python -m pytest                    # engine unit tests (tests/test_loan_engine.py)
+python -m pytest tests/test_loan_engine.py::test_reject   # single test
 docker build -t libo-backend . && docker run -p 8000:8000 --env-file .env libo-backend
 ```
 
@@ -32,7 +34,7 @@ npm run build
 npm run lint      # ESLint 9 flat config (eslint.config.js)
 ```
 
-There is no test suite.
+Only the backend engine has tests; there is no frontend test suite.
 
 Feature documentation (Korean) lives in `docs/features.md`; keep it in sync when changing engine rules, tools, or the API.
 
@@ -43,7 +45,7 @@ Request flow: `frontend/src/App.jsx` → `POST /chat {message, history}` → `ba
 - **Stateless chat**: the frontend keeps the full conversation and sends it as `history: [{role: "user"|"assistant", content}]` on every request; the backend converts it to `HumanMessage`/`AIMessage`. No server-side session.
 - **System prompt** (`rag/chatbot.py`) defines the agent's behavior: ask for missing inputs (income, credit score, existing repayment, loan amount, job years, product type) before calling the calculator, and always end answers with a `[출처: ...]` citation.
 - **`loan_calculator` tool** wraps `logic/loan_engine.py:LoanReviewEngine.run_simulation`. Optional inputs (`interest_rate` %, `term_years`, `stress_rate_increase` %p, `has_payroll`, `auto_transfers`) default to `None` so the tool can tell "not provided" apart; it then fills the `DEFAULT_*` constants in `tools.py` and lists them under `applied_conditions` → `기본값 적용 항목`, which the system prompt tells the agent to disclose. Percent inputs are converted to fractions before calling the engine. `user_role` (staff/manager/hq) defaults to `manager`.
-- **`LoanReviewEngine`** encodes the internal rules from `data/regulations/internal_rules/디디 내부심사규정.txt`: CSS score (credit 40 + income 30 + transaction 20 + job stability 10 → grade 1–5), DSR via level-payment amortization, and approval authority levels (0 auto-approve / 1 branch manager / 2 HQ / 99 reject). If you change thresholds here, keep them consistent with that regulation text (and vice versa), since the RAG side cites the document while the engine computes the numbers.
+- **`LoanReviewEngine`** encodes the internal rules from `data/regulations/internal_rules/디디 내부심사규정.txt`: CSS score (credit 40 + income 30 + transaction 20 + asset stability 10 → grade 1–15 via `GRADE_CUTOFFS`), DSR via level-payment amortization, credit-loan limit and cutoffs (job ≥ 24 months, grade < 9), and approval authority levels (0 auto-approve / 1 branch manager / 2 HQ / 99 reject). Collateral (LTV, vehicle) and policy-loan detail rules are not implemented yet (issue #9). The regulation text was amended to fill gaps (score→grade table, 7–10 grade → HQ, DSR > 50% reject). If you change thresholds here, keep them consistent with that regulation text (and vice versa), since the RAG side cites the document while the engine computes the numbers.
 - **`regulatory_search` tool** uses `rag/vector_store.py:get_retriever` (similarity, k=4). Indexing walks `backend/data/regulations/` recursively, loads `.pdf` (PyPDFLoader) and `.txt` (UTF-8 TextLoader), chunks 1000/200, embeds with the configured provider's embeddings, and stores `source_file` + `category` metadata. Category is derived from the folder name (`internal_rules`, `products`, `guidelines`, else `general`).
 - **`app/llm_provider.py`** is the only place chat/embedding models are constructed. `get_chat_model()` dispatches on `LLM_PROVIDER` and `get_embeddings()` on `EMBEDDING_PROVIDER` (falls back to `LLM_PROVIDER`) via the `PROVIDERS` registry; model names come from `GEMINI_*` / `OPENAI_*` env vars. The embedding provider at query time must match the one that built the vector DB (dimensions differ); changing it requires a rebuild. Indexing embeds in batches (`EMBED_BATCH_SIZE`, `EMBED_BATCH_DELAY`) to stay under Gemini free-tier per-minute limits. `langchain-google-genai` is pinned to 2.0.7, the newest release compatible with `langchain-core==0.3.25`.
 - `tools.py` instantiates the engine and retriever at import time, and `chatbot.py` silently falls back to `tools = []` on `ImportError`.

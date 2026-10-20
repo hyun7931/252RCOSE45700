@@ -22,3 +22,5 @@ python-dotenv
 pydantic
 faker
 pypdf
+# Test
+pytest

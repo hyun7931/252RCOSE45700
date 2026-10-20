@@ -15,6 +15,7 @@ DEFAULT_TERM_YEARS = 5       # 대출 기간 (년)
 DEFAULT_STRESS_RATE = 2.0    # 스트레스 테스트 금리 상승폭 (%p), 내부심사규정 제5장
 DEFAULT_HAS_PAYROLL = False  # 급여이체 여부
 DEFAULT_AUTO_TRANSFERS = 0   # 자동이체 건수
+DEFAULT_ASSET_AMOUNT = 0     # 보유 자산 (원)
 
 class CalculatorInput(BaseModel):
     annual_income: int = Field(description="연소득 (단위: 원). 예: 50000000")
@@ -22,13 +23,14 @@ class CalculatorInput(BaseModel):
     current_annual_repayment: int = Field(description="기존 대출의 연간 원리금 상환액 (단위: 원). 없으면 0", default=0)
     loan_amount: int = Field(description="신규 대출 신청 금액 (단위: 원)")
     product_type: str = Field(description="상품 종류 (credit:직장인신용, mortgage:주택담보, auto:자동차, policy:새희망홀씨)", default="credit")
-    job_years: int = Field(description="재직 기간 (년 단위). 모르면 0", default=0)
+    job_months: int = Field(description="재직 기간 (개월 단위). 예: 2년 6개월 → 30. 모르면 0", default=0)
     user_role: str = Field(description="사용자 직급 (staff:행원, manager:지점장, hq:본부심사역)", default="manager")
     interest_rate: Optional[float] = Field(description=f"연 금리 (% 단위). 예: 4.5. 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_RATE}%)", default=None)
     term_years: Optional[int] = Field(description=f"대출 기간 (년). 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_TERM_YEARS}년)", default=None)
     stress_rate_increase: Optional[float] = Field(description=f"스트레스 테스트 금리 상승폭 (%p 단위). 예: '금리 3% 오르면' → 3. 말하지 않았으면 비워둘 것 (기본 {DEFAULT_STRESS_RATE}%p)", default=None)
     has_payroll: Optional[bool] = Field(description="당행 급여이체 여부. 모르면 비워둘 것 (기본: 없음)", default=None)
     auto_transfers: Optional[int] = Field(description="당행 자동이체 건수. 모르면 비워둘 것 (기본: 0건)", default=None)
+    asset_amount: Optional[int] = Field(description="보유 자산 합계 (부동산+예금, 단위: 원). 모르면 비워둘 것 (기본: 0원)", default=None)
 
 #Tool1. 심사 계산기
 @tool("loan_calculator", args_schema=CalculatorInput)
@@ -38,13 +40,14 @@ def loan_calculator(
     loan_amount: int, 
     current_annual_repayment: int = 0, 
     product_type: str = "credit", 
-    job_years: int = 0,
+    job_months: int = 0,
     user_role: str = "manager",
     interest_rate: Optional[float] = None,
     term_years: Optional[int] = None,
     stress_rate_increase: Optional[float] = None,
     has_payroll: Optional[bool] = None,
-    auto_transfers: Optional[int] = None
+    auto_transfers: Optional[int] = None,
+    asset_amount: Optional[int] = None
 ):
     """
     고객의 재무 정보를 바탕으로 DSR, 내부 등급(CSS), 대출 승인 여부, 전결 권한, 금리 상승 시 DSR을 계산하는 시뮬레이터입니다.
@@ -62,14 +65,16 @@ def loan_calculator(
     stress = pick(stress_rate_increase, DEFAULT_STRESS_RATE, f"스트레스 금리 상승폭 +{DEFAULT_STRESS_RATE}%p")
     payroll = pick(has_payroll, DEFAULT_HAS_PAYROLL, "급여이체 없음")
     transfers = pick(auto_transfers, DEFAULT_AUTO_TRANSFERS, f"자동이체 {DEFAULT_AUTO_TRANSFERS}건")
+    assets = pick(asset_amount, DEFAULT_ASSET_AMOUNT, f"보유 자산 {DEFAULT_ASSET_AMOUNT}원")
 
     user_data = {
         "annual_income": annual_income,
         "credit_score": credit_score,
         "current_annual_repayment": current_annual_repayment,
-        "job_years": job_years,
+        "job_months": job_months,
         "has_payroll": payroll,
-        "auto_transfers": transfers
+        "auto_transfers": transfers,
+        "asset_amount": assets
     }
     loan_request = {
         "amount": loan_amount,
@@ -87,6 +92,7 @@ def loan_calculator(
             "스트레스 금리 상승폭": f"+{stress}%p",
             "급여이체": "있음" if payroll else "없음",
             "자동이체": f"{transfers}건",
+            "보유 자산": f"{assets:,}원",
             "기본값 적용 항목": assumed or "없음",
         }
         return result
