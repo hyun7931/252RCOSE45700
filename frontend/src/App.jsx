@@ -10,6 +10,10 @@ import {
   MessageInput,
   TypingIndicator
 } from '@chatscope/chat-ui-kit-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import './index.css';
 
 function App() {
@@ -65,7 +69,7 @@ function App() {
     },
     {
       title: "🧮 내 조건으로 심사 시뮬레이션",
-      query: "연봉 6천, 신용 850점, 기존대출 1천만원 있어. 1억 대출 가능해?"
+      query: "연봉 8천, 신용 900점, 재직 3년 6개월 직장인이야. 기존 상환 연 500만 원, 급여이체·자동이체 3건 있고 자산 3억. 금리 5%, 5년으로 직장인 신용대출 1억 가능해?"
     },
     {
       title: "🏠 주택담보대출 규제(LTV/DSR) 확인",
@@ -113,7 +117,17 @@ function App() {
 
             {/* --- 실제 채팅 대화 --- */}
             {messages.map((msg, i) => (
-              <Message key={i} model={msg} />
+              msg.direction === "incoming" ? (
+                <Message key={i} model={{ ...msg, type: "custom" }}>
+                  <Message.CustomContent>
+                    <div className="markdown-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{msg.message}</ReactMarkdown>
+                    </div>
+                  </Message.CustomContent>
+                </Message>
+              ) : (
+                <Message key={i} model={msg} />
+              )
             ))}
           </MessageList>
 
