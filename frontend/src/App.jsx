@@ -46,7 +46,7 @@ function App() {
       
       setMessages([...newMessages, newBotMessage]);
       
-    } catch (error) {
+    } catch {
       const errorMessage = {
         message: "⚠️ 서버 연결에 실패했습니다.",
         sender: "system",

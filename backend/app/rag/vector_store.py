@@ -26,7 +26,7 @@ def load_documents():
             
             category = "general"
             if "internal_rules" in folder_name: category = "internal_rule"
-            elif "public_products" in folder_name: category = "product"
+            elif "products" in folder_name: category = "product"
             elif "guidelines" in folder_name: category = "guideline"
 
             try:
