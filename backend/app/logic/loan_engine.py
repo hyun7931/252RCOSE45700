@@ -108,6 +108,7 @@ class LoanReviewEngine:
         req_amt = loan_request.get('amount', 0)
         req_rate = loan_request.get('rate', 0.05)
         req_term = loan_request.get('term', 5)
+        stress_add = loan_request.get('stress_rate_increase', 0.02)
         prod_type = loan_request.get('product_type', 'credit')
         #CSS 계산
         css_result = self.calculate_css_score(
@@ -119,7 +120,7 @@ class LoanReviewEngine:
         
         #DSR 계산
         dsr = self.calculate_dsr(income, cur_debt_pay, req_amt, req_rate, req_term)
-        stress_dsr = self.calculate_dsr(income, cur_debt_pay, req_amt, req_rate + 0.02, req_term)
+        stress_dsr = self.calculate_dsr(income, cur_debt_pay, req_amt, req_rate + stress_add, req_term)
         
         #판정 필요 레벨과 사용자
         required_auth = self.determine_approval_authority(req_amt, css_result['grade'], dsr, prod_type)
@@ -127,7 +128,7 @@ class LoanReviewEngine:
         
         return {
             "css": css_result,
-            "dsr": {"current": dsr * 100, "stress": stress_dsr * 100},
+            "dsr": {"current": round(dsr * 100, 2), "stress": round(stress_dsr * 100, 2), "stress_rate_increase": f"+{stress_add * 100:g}%p"},
             "required_authority": required_auth['type'],
             "user_role_check": final_judgment,
             "risk_analysis": "금리 상승 시 DSR 규제(40%) 초과 위험" if stress_dsr > 0.4 else "금리 변동 리스크 안정적"
