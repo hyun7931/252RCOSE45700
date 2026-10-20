@@ -8,7 +8,7 @@ LIBO (Loan Intelligence Banking Officer) — a hybrid loan-underwriting assistan
 
 ## Commands
 
-Backend (run from `backend/`; imports are `app.*`, so the working directory must be `backend/`). Requires `OPENAI_API_KEY` in `backend/.env` (loaded via python-dotenv).
+Backend (run from `backend/`; imports are `app.*`, so the working directory must be `backend/`). Requires `OPENAI_API_KEY` in `backend/.env` (loaded via python-dotenv; copy from `backend/.env.example`).
 
 ```bash
 pip install -r requirements.txt
