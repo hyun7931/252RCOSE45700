@@ -2,10 +2,11 @@
 
 import os
 import shutil
+import time
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+from app.llm_provider import get_embeddings
 from langchain_core.documents import Document
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,7 +27,7 @@ def load_documents():
             
             category = "general"
             if "internal_rules" in folder_name: category = "internal_rule"
-            elif "public_products" in folder_name: category = "product"
+            elif "products" in folder_name: category = "product"
             elif "guidelines" in folder_name: category = "guideline"
 
             try:
@@ -70,18 +71,27 @@ def init_vector_db(reset=True):
     splits = text_splitter.split_documents(documents)
     print(f"문서 분할 완료: 총 {len(splits)}개 청크 생성")
 
-    #DB저장
-    Chroma.from_documents(
-        documents=splits,
-        embedding=OpenAIEmbeddings(),
+    #DB저장 (임베딩 API 분당 요청 한도를 넘지 않도록 나눠서 저장)
+    batch_size = int(os.getenv("EMBED_BATCH_SIZE", "30"))
+    batch_delay = float(os.getenv("EMBED_BATCH_DELAY", "60"))
+
+    vector_db = Chroma(
+        embedding_function=get_embeddings(),
         persist_directory=DB_PATH
     )
+    for start in range(0, len(splits), batch_size):
+        if start > 0 and batch_delay > 0:
+            print(f"임베딩 한도 대기 {batch_delay:.0f}초")
+            time.sleep(batch_delay)
+        batch = splits[start:start + batch_size]
+        vector_db.add_documents(batch)
+        print(f"임베딩 저장: {start + len(batch)}/{len(splits)}")
     print(f"chromadb에 저장, 경로: {DB_PATH}")
 
 def get_retriever():
     vector_db = Chroma(
         persist_directory=DB_PATH,
-        embedding_function=OpenAIEmbeddings()
+        embedding_function=get_embeddings()
     )
     
     return vector_db.as_retriever(
