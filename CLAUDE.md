@@ -53,6 +53,6 @@ Request flow: `frontend/src/App.jsx` → `POST /chat {message, history}` → `ba
 ## Gotchas
 
 - The frontend hardcodes the API URL `http://127.0.0.1:8000/chat` in `App.jsx`; change it for deployment (README demo used S3 for the frontend and EC2 for the backend).
-- Frontend uses **React 17** (`ReactDOM.render`), not 18.
+- Frontend uses **React 17** (`ReactDOM.render`), not 18, so markdown libs are pinned to the unified-10 generation: `react-markdown@8`, `remark-gfm@3`, `rehype-raw@6`, `rehype-sanitize@5`. Newer majors require React 18. Bot messages render via chatscope `Message.CustomContent` inside `.markdown-body`; keep `rehype-sanitize` after `rehype-raw` since LLM/RAG output is untrusted.
 - The root-level `package.json` is a stray dependency list; the real frontend project is `frontend/`.
 - `scripts/init_data.py` seeds a local Oracle XE DB (`CUSTOMERS`, `LOAN_ACCOUNTS`, `DELINQUENCY_HISTORY`) with Faker data, but Oracle is not wired into the backend yet (`oracledb` is commented out in `requirements.txt`); it is listed as a TODO in the README.

@@ -10,6 +10,10 @@ import {
   MessageInput,
   TypingIndicator
 } from '@chatscope/chat-ui-kit-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import './index.css';
 
 function App() {
@@ -113,7 +117,17 @@ function App() {
 
             {/* --- 실제 채팅 대화 --- */}
             {messages.map((msg, i) => (
-              <Message key={i} model={msg} />
+              msg.direction === "incoming" ? (
+                <Message key={i} model={{ ...msg, type: "custom" }}>
+                  <Message.CustomContent>
+                    <div className="markdown-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{msg.message}</ReactMarkdown>
+                    </div>
+                  </Message.CustomContent>
+                </Message>
+              ) : (
+                <Message key={i} model={msg} />
+              )
             ))}
           </MessageList>
 
