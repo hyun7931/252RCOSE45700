@@ -23,7 +23,8 @@ class CalculatorInput(BaseModel):
     current_annual_repayment: int = Field(description="기존 대출의 연간 원리금 상환액 (단위: 원). 없으면 0", default=0)
     loan_amount: int = Field(description="신규 대출 신청 금액 (단위: 원)")
     product_type: str = Field(description="상품 종류 (credit:직장인신용, mortgage:주택담보, auto:자동차, policy:새희망홀씨)", default="credit")
-    job_months: int = Field(description="재직 기간 (개월 단위). 예: 2년 6개월 → 30. 모르면 0", default=0)
+    job_years: int = Field(description="재직 기간의 년 부분. 예: 2년 6개월 → 2. 모르면 0", default=0)
+    job_months: int = Field(description="재직 기간의 개월 부분. 예: 2년 6개월 → 6, 18개월 → 18. 모르면 0", default=0)
     user_role: str = Field(description="사용자 직급 (staff:행원, manager:지점장, hq:본부심사역)", default="manager")
     interest_rate: Optional[float] = Field(description=f"연 금리 (% 단위). 예: 4.5. 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_RATE}%)", default=None)
     term_years: Optional[int] = Field(description=f"대출 기간 (년). 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_TERM_YEARS}년)", default=None)
@@ -40,6 +41,7 @@ def loan_calculator(
     loan_amount: int, 
     current_annual_repayment: int = 0, 
     product_type: str = "credit", 
+    job_years: int = 0,
     job_months: int = 0,
     user_role: str = "manager",
     interest_rate: Optional[float] = None,
@@ -71,7 +73,7 @@ def loan_calculator(
         "annual_income": annual_income,
         "credit_score": credit_score,
         "current_annual_repayment": current_annual_repayment,
-        "job_months": job_months,
+        "job_months": job_years * 12 + job_months,
         "has_payroll": payroll,
         "auto_transfers": transfers,
         "asset_amount": assets

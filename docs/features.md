@@ -34,7 +34,7 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 | `loan_amount` | 신규 대출 신청 금액(원) | 필수 |
 | `current_annual_repayment` | 기존 대출 연간 원리금 상환액(원) | 0 |
 | `product_type` | `credit`(직장인신용) / `mortgage`(주택담보) / `auto`(자동차) / `policy`(새희망홀씨) | `credit` |
-| `job_months` | 재직 기간(개월) | 0 |
+| `job_years` / `job_months` | 재직 기간의 년 / 개월 부분 (예: 2년 6개월 → 2 / 6). 코드에서 개월로 합산 | 0 |
 | `user_role` | 사용자 직급: `staff`(행원) / `manager`(지점장) / `hq`(본부심사역) | `manager` |
 | `interest_rate` | 연 금리(%) | 5 |
 | `term_years` | 대출 기간(년) | 5 |
