@@ -24,6 +24,9 @@ def make_user(**overrides):
     return user
 
 
+MORTGAGE = {"product_type": "mortgage", "collateral_value": 1000000000, "region": "normal"}
+
+
 def make_request(**overrides):
     req = {"amount": 30000000, "rate": 0.05, "term": 5, "stress_rate_increase": 0.02, "product_type": "credit"}
     req.update(overrides)
@@ -151,12 +154,12 @@ def test_check_user_authority(engine):
 def test_stress_risk_uses_50_percent(engine):
     # 연소득 6천, 기존 상환 1천 / 신규 4천만 → 스트레스 DSR 약 33%, 1억 → 약 56%
     result = engine.run_simulation(make_user(annual_income=60000000, current_annual_repayment=10000000),
-                                   make_request(amount=40000000, product_type="mortgage"))
+                                   make_request(amount=40000000, **MORTGAGE))
     assert result["dsr"]["stress"] < 50
     assert result["risk_analysis"] == "금리 변동 리스크 안정적"
 
     result = engine.run_simulation(make_user(annual_income=60000000, current_annual_repayment=10000000),
-                                   make_request(amount=100000000, product_type="mortgage"))
+                                   make_request(amount=100000000, **MORTGAGE))
     assert result["dsr"]["stress"] > 50
     assert "50%" in result["risk_analysis"]
 
@@ -169,5 +172,56 @@ def test_run_simulation_credit_includes_limit(engine):
 
 
 def test_run_simulation_non_credit_has_no_limit(engine):
-    result = engine.run_simulation(make_user(), make_request(product_type="mortgage"))
+    result = engine.run_simulation(make_user(), make_request(**MORTGAGE))
     assert "credit_limit" not in result
+
+
+# --- 제3장 2항: 주택담보대출 LTV ---
+
+@pytest.mark.parametrize("region,actual_demand,limit", [
+    ("speculative", False, 40), ("speculative", True, 50),
+    ("adjusted", False, 50), ("adjusted", True, 50),
+    ("normal", False, 70),
+])
+def test_ltv_limits_by_region(engine, region, actual_demand, limit):
+    ltv = engine.calculate_ltv(100000000, 500000000, region, actual_demand)
+    assert ltv["limit"] == limit
+    assert ltv["ratio"] == 20
+    assert ltv["max_loan"] == 500000000 * limit // 100
+
+
+def test_ltv_max_loan_no_float_error(engine):
+    assert engine.calculate_ltv(400000000, 700000000, "normal")["max_loan"] == 490000000
+
+
+def test_ltv_invalid_inputs(engine):
+    with pytest.raises(ValueError):
+        engine.calculate_ltv(100000000, 500000000, "seoul")
+    with pytest.raises(ValueError):
+        engine.calculate_ltv(100000000, 0, "normal")
+
+
+def test_ltv_over_limit_rejected(engine):
+    # 투기과열 40%: 담보 5억 → 한도 2억, 2.5억 신청은 거절
+    result = engine.run_simulation(make_user(), make_request(amount=250000000, term=30, product_type="mortgage",
+                                                             collateral_value=500000000, region="speculative"))
+    assert result["ltv"]["ratio"] == 50
+    assert "LTV 40% 한도" in result["required_authority"]
+
+
+def test_ltv_actual_demand_within_limit(engine):
+    # 투기과열 실수요자 50%: 같은 2.5억 신청이 한도 내 → 2억 초과로 본부 심사
+    result = engine.run_simulation(make_user(), make_request(amount=250000000, term=30, product_type="mortgage",
+                                                             collateral_value=500000000, region="speculative",
+                                                             is_actual_demand=True))
+    assert result["ltv"]["limit"] == 50
+    assert result["required_authority"] == "본부 심사 필수 (2억 초과)"
+
+
+def test_mortgage_requires_collateral(engine):
+    with pytest.raises(ValueError):
+        engine.run_simulation(make_user(), make_request(product_type="mortgage"))
+
+
+def test_non_mortgage_has_no_ltv(engine):
+    assert "ltv" not in engine.run_simulation(make_user(), make_request())

@@ -19,11 +19,17 @@ class LoanReviewEngine:
         # 제4장 4항 거절 등급 (새희망홀씨 10등급 이내 승인 특례도 이 기준으로 충족)
         self.REJECT_GRADE = 11
 
-        # TODO(#9): 주택담보대출 LTV 판정에 사용
+        # 제3장 2항 나: 주택담보대출 지역별 LTV
         self.LTV_LIMITS = {
-            "speculative": 0.50,
-            "adjusted": 0.60,
+            "speculative": 0.40,
+            "adjusted": 0.50,
             "normal": 0.70
+        }
+        self.LTV_SPECULATIVE_ACTUAL_DEMAND = 0.50   # 투기과열지구 실수요자
+        self.REGION_NAMES = {
+            "speculative": "투기과열지구",
+            "adjusted": "조정대상지역",
+            "normal": "기타 일반지역"
         }
 
     def calculate_css_score(self, nice_score, income, has_payroll, auto_transfers, asset_amount):
@@ -98,7 +104,27 @@ class LoanReviewEngine:
         dsr_amount = self.max_loan_within_dsr(annual_income, current_annual_debt, interest_rate, duration_years, self.DSR_LIMIT_NORMAL)
         return int(min(annual_income * income_multiple, self.CREDIT_MAX_LIMIT, dsr_amount))
 
-    def determine_approval_authority(self, loan_amount, grade, dsr, product_type="credit", job_months=0, credit_limit=None):
+    def calculate_ltv(self, loan_amount, collateral_value, region, is_actual_demand=False):
+        """
+        [규정] 제3장 2항 나: 주택담보대출 LTV 운용 기준
+        """
+        if region not in self.LTV_LIMITS:
+            raise ValueError(f"알 수 없는 지역 구분: {region} (사용 가능: {', '.join(self.LTV_LIMITS)})")
+        if not collateral_value or collateral_value <= 0:
+            raise ValueError("담보가액은 0보다 커야 합니다.")
+
+        limit = self.LTV_LIMITS[region]
+        if region == "speculative" and is_actual_demand:
+            limit = self.LTV_SPECULATIVE_ACTUAL_DEMAND
+
+        return {
+            "ratio": round(loan_amount / collateral_value * 100, 2),
+            "limit": round(limit * 100, 2),
+            "region": self.REGION_NAMES[region] + (" (실수요자)" if region == "speculative" and is_actual_demand else ""),
+            "max_loan": int(round(collateral_value * limit))
+        }
+
+    def determine_approval_authority(self, loan_amount, grade, dsr, product_type="credit", job_months=0, credit_limit=None, ltv=None):
         """
         [규정] 제3장 컷오프, 제4장: 전결 권한 판정 (권한 레벨 반환)
         Level 0: 자동승인 / Level 1: 지점장 / Level 2: 본부 / Level 99: 거절
@@ -116,6 +142,8 @@ class LoanReviewEngine:
                 reject.append(f"직장인대출 {self.CREDIT_REJECT_GRADE}등급 이하")
             if credit_limit is not None and loan_amount > credit_limit:
                 reject.append(f"한도({credit_limit:,}원) 초과")
+        if ltv is not None and loan_amount > ltv["max_loan"]:
+            reject.append(f"LTV {ltv['limit']:g}% 한도({ltv['max_loan']:,}원) 초과")
         if reject:
             return {"level": 99, "type": f"❌ 거절 (Reject: {', '.join(dict.fromkeys(reject))})"}
 
@@ -161,6 +189,8 @@ class LoanReviewEngine:
         req_term = loan_request.get('term', 5)
         stress_add = loan_request.get('stress_rate_increase', 0.02)
         prod_type = loan_request.get('product_type', 'credit')
+        if prod_type == "mortgage" and (not loan_request.get('collateral_value') or not loan_request.get('region')):
+            raise ValueError("주택담보대출은 담보가액(collateral_value)과 지역 구분(region)이 필요합니다.")
         #CSS 계산
         css_result = self.calculate_css_score(
             nice, income,
@@ -178,8 +208,13 @@ class LoanReviewEngine:
         if prod_type == "credit":
             credit_limit = self.calculate_credit_limit(income, cur_debt_pay, req_rate, req_term, css_result['grade'])
 
+        #주택담보대출 LTV
+        ltv = None
+        if prod_type == "mortgage":
+            ltv = self.calculate_ltv(req_amt, loan_request['collateral_value'], loan_request['region'], loan_request.get('is_actual_demand', False))
+
         #판정 필요 레벨과 사용자
-        required_auth = self.determine_approval_authority(req_amt, css_result['grade'], dsr, prod_type, job_months, credit_limit)
+        required_auth = self.determine_approval_authority(req_amt, css_result['grade'], dsr, prod_type, job_months, credit_limit, ltv)
         final_judgment = self.check_user_authority(required_auth, user_role)
 
         result = {
@@ -189,6 +224,8 @@ class LoanReviewEngine:
             "user_role_check": final_judgment,
             "risk_analysis": f"금리 상승 시 DSR {self.STRESS_DSR_LIMIT:.0%} 초과 위험 (내부심사규정 제5장)" if stress_dsr > self.STRESS_DSR_LIMIT else "금리 변동 리스크 안정적"
         }
+        if ltv is not None:
+            result["ltv"] = ltv
         if credit_limit is not None:
             result["credit_limit"] = credit_limit
         return result
@@ -208,7 +245,8 @@ if __name__ == "__main__":
     # 테스트 케이스: 3억 대출 (본부 심사 대상)
     test_req = {
         "amount": 300000000,
-        "rate": 0.05, "term": 30, "product_type": "mortgage"
+        "rate": 0.05, "term": 30, "product_type": "mortgage",
+        "collateral_value": 800000000, "region": "normal"
     }
 
     # 1. 지점장(Manager) 권한으로 시도 -> 권한 부족 떠야 함
