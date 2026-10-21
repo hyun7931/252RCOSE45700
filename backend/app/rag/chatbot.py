@@ -9,6 +9,7 @@ import os
 load_dotenv()
 
 from app.rag.form import build_form, form_prompt
+from app.rag.result_summary import render_summary, check_commentary, is_calculation_result
 
 try:
     from app.rag.tools import tools, loan_calculator
@@ -34,7 +35,8 @@ SYSTEM_PROMPT = """
     2. **수치 계산**: 'loan_calculator' 도구로 DSR과 등급을 계산하세요.
        - 금리, 대출 기간, 급여이체 여부, 자동이체 건수, 보유 자산, 금리 상승폭은 사용자가 말한 경우에만 도구에 넣고, 말하지 않았으면 비워두세요. (임의로 추정하지 마세요)
        - "금리가 3% 오르면?"처럼 금리 상승을 물으면 이전 대화의 고객 정보에 stress_rate_increase를 넣어 다시 계산하세요.
-       - 결과의 applied_conditions에 '기본값 적용 항목'이 있으면, 답변에 어떤 기본값으로 계산했는지 밝히고 실제 값을 알려주면 다시 계산할 수 있다고 안내하세요.
+       - **계산 결과의 수치(등급·DSR·한도·LTV)와 판정, 적용 조건·기본값은 화면에 표로 자동 표시됩니다.** 답변에서 수치를 다시 나열하지 말고, 판정 이유·주의할 점·다음 조치만 3~5문장으로 설명하세요.
+       - 판정을 바꾸거나 과장하지 마세요. 권한 부족·본부 심사·거절인 경우 "대출 가능합니다", "승인 가능합니다"처럼 단정하지 마세요.
     3. **규정 검색**: 상품의 세부 조건(금리, 한도 등)은 'regulatory_search' 도구로 확인하세요.
     4. **출처 명시**: 답변의 끝은 항상 정보의 출처를 명시하세요. (출처 : 파일명, 규정 조항, 또는 '심사 엔진 결과' 등)
         - 예시 : [출처: 디디 내부심사규정.txt 12p] / [출처: 여신심사 선진화를 위한 가이드라인.txt 10p] / [출처: 내부 심사 엔진 결과]
@@ -78,12 +80,53 @@ def get_chatbot_response(user_input: str, chat_history: list):
         print(f"에이전트 실행 중 오류: {e}")
         return {"response": ERROR_MESSAGE, "form": None}
 
-    # 마지막 계산기 호출이 필수 정보 누락이면 입력 폼을 함께 보냄
-    form = None
+    # 마지막 계산기 호출 기준: 필수 정보 누락이면 입력 폼, 계산 결과면 표 + 검증된 해설
+    form, calc, calc_inputs = None, None, None
     for action, observation in response.get("intermediate_steps", []):
         if action.tool == "loan_calculator":
             form = build_form(observation, action.tool_input)
+            calc, calc_inputs = (observation, action.tool_input) if is_calculation_result(observation) else (None, None)
+
+    if calc is not None:
+        answer = summarize_with_commentary(calc, calc_inputs, chat_history, draft=response["output"])
+        return {"response": answer, "form": None}
     return {"response": response["output"], "form": form}
+
+
+def generate_commentary(result, inputs, chat_history, feedback=None):
+    """엔진 결과에 대한 LLM 해설 (수치 나열 없이 판정 이유·주의사항·다음 조치)"""
+    instruction = (
+        "심사 엔진(loan_calculator)이 아래 결과를 계산했습니다. 수치와 판정은 화면에 표로 따로 표시되므로 "
+        "수치를 다시 나열하지 말고, 판정 이유·주의할 점·다음 조치만 3~5문장으로 설명하세요. "
+        "판정을 바꾸거나 과장하지 말고, 권한 부족·본부 심사·거절이면 '대출 가능합니다'처럼 단정하지 마세요. "
+        "끝에 [출처: 내부 심사 엔진 결과]를 붙이세요.\n\n"
+        f"[입력 조건]\n{json.dumps(inputs or {}, ensure_ascii=False, default=str)}\n\n"
+        f"[심사 엔진 결과]\n{json.dumps(result, ensure_ascii=False, default=str)}"
+    )
+    if feedback:
+        instruction += "\n\n[이전 해설의 문제 — 고쳐서 다시 쓰세요]\n" + "\n".join(f"- {p}" for p in feedback)
+    messages = [SystemMessage(content=SYSTEM_PROMPT), *format_history(chat_history), HumanMessage(content=instruction)]
+    return llm.invoke(messages).content
+
+
+def summarize_with_commentary(result, inputs, chat_history, draft=None):
+    """표(코드) + 해설(LLM). 해설이 판정과 모순되면 1회 재생성, 그래도 실패하면 표만"""
+    table = render_summary(result)
+    try:
+        commentary = draft if draft is not None else generate_commentary(result, inputs, chat_history)
+        problems = check_commentary(commentary, result)
+        if problems:
+            print(f"해설 검증 실패, 재생성: {problems}")
+            commentary = generate_commentary(result, inputs, chat_history, feedback=problems)
+            problems = check_commentary(commentary, result)
+    except Exception as e:
+        print(f"결과 해설 생성 중 오류: {e}")
+        commentary, problems = None, ["해설 생성 실패"]
+
+    if problems:
+        print(f"해설 검증 재실패, 표만 표시: {problems}")
+        return f"{table}\n\n위 표의 판정과 수치를 기준으로 검토해 주세요.\n\n[출처: 내부 심사 엔진 결과]"
+    return f"{table}\n\n{commentary}"
 
 
 def get_form_response(form_values: dict, chat_history: list):
@@ -98,23 +141,7 @@ def get_form_response(form_values: dict, chat_history: list):
     form = build_form(result, values)
     if form is not None:
         return {"response": form_prompt(form["missing"]), "form": form}
-    if isinstance(result, str):
+    if not is_calculation_result(result):
         return {"response": result, "form": None}
 
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        *format_history(chat_history),
-        HumanMessage(content=(
-            "심사역이 입력 폼으로 아래 조건을 제출했고, 심사 엔진(loan_calculator)이 계산한 결과는 다음과 같습니다.\n"
-            "이 결과만 근거로 심사 결과를 설명하세요. 숫자를 바꾸거나 다시 계산하지 마세요. "
-            "기본값 적용 항목이 있으면 안내하고, 끝에 [출처: 내부 심사 엔진 결과]를 붙이세요.\n\n"
-            f"[입력 조건]\n{json.dumps(values, ensure_ascii=False)}\n\n"
-            f"[심사 엔진 결과]\n{json.dumps(result, ensure_ascii=False)}"
-        )),
-    ]
-    try:
-        answer = llm.invoke(messages).content
-    except Exception as e:
-        print(f"결과 설명 생성 중 오류: {e}")
-        return {"response": ERROR_MESSAGE, "form": None}
-    return {"response": answer, "form": None}
+    return {"response": summarize_with_commentary(result, values, chat_history), "form": None}
