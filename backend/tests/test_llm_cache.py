@@ -65,3 +65,41 @@ def test_structured_value_round_trip():
     key = llm_cache.make_key("router", {"message": "신용대출 1억 가능해?"})
     llm_cache.put(key, value)
     assert llm_cache.get(key) == value
+
+
+# --- 오래된 캐시 만료·삭제 ---
+
+def _age(key, days):
+    """테스트용: 항목 저장 시각을 days일 전으로 바꿈"""
+    with llm_cache._connect() as conn:
+        conn.execute("UPDATE llm_cache SET created_at = datetime('now', ?) WHERE key = ?", (f"-{days} days", key))
+
+
+def test_expired_entry_is_ignored_and_purged(monkeypatch):
+    monkeypatch.setenv("LLM_CACHE_TTL_DAYS", "30")
+    old, new = llm_cache.make_key("router", {"x": "old"}), llm_cache.make_key("router", {"x": "new"})
+    llm_cache.put(old, "예전 값")
+    llm_cache.put(new, "새 값")
+    _age(old, 31)
+    assert llm_cache.get(old) is None          # 만료된 값은 쓰지 않음
+    assert llm_cache.get(new) == "새 값"
+    assert llm_cache.purge_expired() == 1      # 만료된 것만 삭제
+    assert llm_cache.get(new) == "새 값"
+
+
+def test_put_refreshes_timestamp(monkeypatch):
+    monkeypatch.setenv("LLM_CACHE_TTL_DAYS", "30")
+    key = llm_cache.make_key("router", {"x": 1})
+    llm_cache.put(key, "값")
+    _age(key, 31)
+    llm_cache.put(key, "다시 저장")
+    assert llm_cache.get(key) == "다시 저장"
+
+
+def test_ttl_zero_never_expires(monkeypatch):
+    monkeypatch.setenv("LLM_CACHE_TTL_DAYS", "0")
+    key = llm_cache.make_key("router", {"x": 1})
+    llm_cache.put(key, "값")
+    _age(key, 3650)
+    assert llm_cache.get(key) == "값"
+    assert llm_cache.purge_expired() == 0
