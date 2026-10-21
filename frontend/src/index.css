@@ -278,3 +278,131 @@ html, body, #root {
   border-top: 1px solid #e5e5e5;
   margin: 1em 0;
 }
+
+/* 6. 심사 입력 폼 */
+.loan-form {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background-color: #fafafa;
+  font-size: 0.9rem;
+  max-width: 640px;
+}
+
+.loan-form.submitted {
+  opacity: 0.6;
+}
+
+.form-section + .form-section {
+  margin-top: 14px;
+}
+
+.form-section h4 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111;
+}
+
+.form-section h4 small {
+  font-weight: 400;
+  color: #888;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-field > span {
+  color: #555;
+}
+
+.form-field.missing > span {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.form-field.missing input,
+.form-field.missing select {
+  border-color: #e74c3c;
+}
+
+.loan-form input,
+.loan-form select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background-color: #fff;
+  font-size: 0.9rem;
+}
+
+.input-with-suffix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.input-with-suffix em {
+  font-style: normal;
+  color: #888;
+  white-space: nowrap;
+}
+
+.customer-row {
+  display: flex;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.loan-form button {
+  padding: 7px 14px;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  background-color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.loan-form button[type="submit"] {
+  background-color: #111;
+  border-color: #111;
+  color: #fff;
+}
+
+.loan-form button:disabled {
+  cursor: default;
+}
+
+.lookup-message {
+  display: block;
+  margin-top: 6px;
+  color: #555;
+}
+
+.form-error {
+  color: #c0392b;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.form-actions small {
+  color: #888;
+}

@@ -6,6 +6,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from app.logic.loan_engine import LoanReviewEngine
 from app.rag.vector_store import get_retriever
 from app.db.customer_repository import fetch_customer_profile, CustomerDBError
+from app.rag.form import missing_message
 
 engine = LoanReviewEngine()
 retriever = get_retriever()
@@ -18,12 +19,13 @@ DEFAULT_HAS_PAYROLL = False  # 급여이체 여부
 DEFAULT_AUTO_TRANSFERS = 0   # 자동이체 건수
 DEFAULT_ASSET_AMOUNT = 0     # 보유 자산 (원)
 
+
 class CalculatorInput(BaseModel):
     customer_id: Optional[str] = Field(description="고객 ID (예: C2025_001). 있으면 고객 DB에서 소득·신용점수·기존 대출·재직 기간·자산·거래 실적·연체 이력을 불러와 계산", default=None)
     annual_income: Optional[int] = Field(description="연소득 (단위: 원). 예: 50000000. 고객 ID가 있으면 비워둘 것", default=None)
     credit_score: Optional[int] = Field(description="NICE 신용점수. 예: 850. 고객 ID가 있으면 비워둘 것", default=None)
     current_annual_repayment: Optional[int] = Field(description="기존 대출의 연간 원리금 상환액 (단위: 원). 고객 ID가 있으면 비워둘 것", default=None)
-    loan_amount: int = Field(description="신규 대출 신청 금액 (단위: 원)")
+    loan_amount: Optional[int] = Field(description="신규 대출 신청 금액 (단위: 원). 모르면 비워둘 것", default=None)
     product_type: str = Field(description="상품 종류 (credit:직장인신용, mortgage:주택담보, auto:자동차, policy:새희망홀씨)", default="credit")
     job_years: Optional[int] = Field(description="재직 기간의 년 부분. 예: 2년 6개월 → 2. 고객 ID가 있으면 비워둘 것", default=None)
     job_months: Optional[int] = Field(description="재직 기간의 개월 부분. 예: 2년 6개월 → 6, 18개월 → 18. 고객 ID가 있으면 비워둘 것", default=None)
@@ -53,7 +55,7 @@ def load_customer(customer_id):
 #Tool1. 심사 계산기
 @tool("loan_calculator", args_schema=CalculatorInput)
 def loan_calculator(
-    loan_amount: int,
+    loan_amount: Optional[int] = None,
     customer_id: Optional[str] = None,
     annual_income: Optional[int] = None,
     credit_score: Optional[int] = None,
@@ -76,6 +78,7 @@ def loan_calculator(
     고객의 재무 정보를 바탕으로 DSR, 내부 등급(CSS), 대출 승인 여부, 전결 권한, 금리 상승 시 DSR을 계산하는 시뮬레이터입니다.
     구체적인 수치 계산(DSR %)이나 '승인/거절' 판단, 금리 상승 시뮬레이션이 필요할 때 반드시 이 도구를 사용하세요.
     고객 ID가 있으면 customer_id만 넣고 고객 정보는 비워두면 고객 DB 값으로 계산합니다.
+    심사 요청이면 정보가 다 모이지 않았어도 아는 값만 넣어 호출하세요. 빠진 필수 항목을 알려줍니다.
     """
     # 값 우선순위: 사용자가 말한 값 > 고객 DB 값 > 기본값
     profile = None
@@ -94,15 +97,22 @@ def loan_calculator(
     auto_transfers = from_db(auto_transfers, "auto_transfers")
     asset_amount = from_db(asset_amount, "asset_amount")
     if job_years is None and job_months is None:
-        total_job_months = profile["job_months"] if profile is not None else 0
+        total_job_months = profile["job_months"] if profile is not None else None
     else:
         total_job_months = (job_years or 0) * 12 + (job_months or 0)
 
-    missing = [label for value, label in [(annual_income, "연소득"), (credit_score, "신용점수")] if value is None]
+    required = {
+        "loan_amount": loan_amount,
+        "annual_income": annual_income,
+        "credit_score": credit_score,
+        "current_annual_repayment": current_annual_repayment,
+        "job_tenure": total_job_months,
+    }
     if product_type == "mortgage":
-        missing += [label for value, label in [(collateral_value, "담보 주택 가액"), (region, "지역 구분(투기과열지구/조정대상지역/일반지역)")] if not value]
+        required.update({"collateral_value": collateral_value or None, "region": region or None})
+    missing = [code for code, value in required.items() if value is None]
     if missing:
-        return f"[필수 정보 누락] 심사에는 {', '.join(missing)}이(가) 필요합니다. 계산하지 말고 사용자에게 먼저 물어보세요."
+        return missing_message(missing)
 
     assumed = []
     def pick(value, default, label):
