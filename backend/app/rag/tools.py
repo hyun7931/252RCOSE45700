@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from langchain_core.pydantic_v1 import BaseModel, Field
 from app.logic.loan_engine import LoanReviewEngine
 from app.rag.vector_store import get_retriever
+from app.db.customer_repository import fetch_customer_profile, CustomerDBError
 
 engine = LoanReviewEngine()
 retriever = get_retriever()
@@ -18,13 +19,14 @@ DEFAULT_AUTO_TRANSFERS = 0   # 자동이체 건수
 DEFAULT_ASSET_AMOUNT = 0     # 보유 자산 (원)
 
 class CalculatorInput(BaseModel):
-    annual_income: int = Field(description="연소득 (단위: 원). 예: 50000000")
-    credit_score: int = Field(description="NICE 신용점수. 예: 850")
-    current_annual_repayment: int = Field(description="기존 대출의 연간 원리금 상환액 (단위: 원). 없으면 0", default=0)
+    customer_id: Optional[str] = Field(description="고객 ID (예: C2025_001). 있으면 고객 DB에서 소득·신용점수·기존 대출·재직 기간·자산·거래 실적·연체 이력을 불러와 계산", default=None)
+    annual_income: Optional[int] = Field(description="연소득 (단위: 원). 예: 50000000. 고객 ID가 있으면 비워둘 것", default=None)
+    credit_score: Optional[int] = Field(description="NICE 신용점수. 예: 850. 고객 ID가 있으면 비워둘 것", default=None)
+    current_annual_repayment: Optional[int] = Field(description="기존 대출의 연간 원리금 상환액 (단위: 원). 고객 ID가 있으면 비워둘 것", default=None)
     loan_amount: int = Field(description="신규 대출 신청 금액 (단위: 원)")
     product_type: str = Field(description="상품 종류 (credit:직장인신용, mortgage:주택담보, auto:자동차, policy:새희망홀씨)", default="credit")
-    job_years: int = Field(description="재직 기간의 년 부분. 예: 2년 6개월 → 2. 모르면 0", default=0)
-    job_months: int = Field(description="재직 기간의 개월 부분. 예: 2년 6개월 → 6, 18개월 → 18. 모르면 0", default=0)
+    job_years: Optional[int] = Field(description="재직 기간의 년 부분. 예: 2년 6개월 → 2. 고객 ID가 있으면 비워둘 것", default=None)
+    job_months: Optional[int] = Field(description="재직 기간의 개월 부분. 예: 2년 6개월 → 6, 18개월 → 18. 고객 ID가 있으면 비워둘 것", default=None)
     user_role: str = Field(description="사용자 직급 (staff:행원, manager:지점장, hq:본부심사역)", default="manager")
     interest_rate: Optional[float] = Field(description=f"연 금리 (% 단위). 예: 4.5. 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_RATE}%)", default=None)
     term_years: Optional[int] = Field(description=f"대출 기간 (년). 사용자가 말하지 않았으면 비워둘 것 (기본 {DEFAULT_TERM_YEARS}년)", default=None)
@@ -36,16 +38,29 @@ class CalculatorInput(BaseModel):
     region: Optional[str] = Field(description="[주택담보대출 필수] 담보 주택 지역 구분 (speculative:투기과열지구, adjusted:조정대상지역, normal:기타 일반지역). 모르면 비워둘 것", default=None)
     is_actual_demand: Optional[bool] = Field(description="[주택담보대출] 실수요자 요건 충족 여부. 모르면 비워둘 것 (기본: 아님)", default=None)
 
+
+def load_customer(customer_id):
+    """고객 프로필 조회. (프로필, 오류 메시지) 반환"""
+    try:
+        profile = fetch_customer_profile(customer_id)
+    except CustomerDBError as e:
+        return None, f"[DB 연결 실패] {e}"
+    if profile is None:
+        return None, f"[고객 없음] 고객 ID '{customer_id}'를 찾을 수 없습니다. 고객 ID를 다시 확인해 달라고 사용자에게 요청하세요."
+    return profile, None
+
+
 #Tool1. 심사 계산기
 @tool("loan_calculator", args_schema=CalculatorInput)
 def loan_calculator(
-    annual_income: int, 
-    credit_score: int, 
-    loan_amount: int, 
-    current_annual_repayment: int = 0, 
-    product_type: str = "credit", 
-    job_years: int = 0,
-    job_months: int = 0,
+    loan_amount: int,
+    customer_id: Optional[str] = None,
+    annual_income: Optional[int] = None,
+    credit_score: Optional[int] = None,
+    current_annual_repayment: Optional[int] = None,
+    product_type: str = "credit",
+    job_years: Optional[int] = None,
+    job_months: Optional[int] = None,
     user_role: str = "manager",
     interest_rate: Optional[float] = None,
     term_years: Optional[int] = None,
@@ -60,11 +75,34 @@ def loan_calculator(
     """
     고객의 재무 정보를 바탕으로 DSR, 내부 등급(CSS), 대출 승인 여부, 전결 권한, 금리 상승 시 DSR을 계산하는 시뮬레이터입니다.
     구체적인 수치 계산(DSR %)이나 '승인/거절' 판단, 금리 상승 시뮬레이션이 필요할 때 반드시 이 도구를 사용하세요.
+    고객 ID가 있으면 customer_id만 넣고 고객 정보는 비워두면 고객 DB 값으로 계산합니다.
     """
+    # 값 우선순위: 사용자가 말한 값 > 고객 DB 값 > 기본값
+    profile = None
+    if customer_id:
+        profile, error = load_customer(customer_id)
+        if error:
+            return error
+
+    def from_db(value, key):
+        return profile[key] if value is None and profile is not None else value
+
+    annual_income = from_db(annual_income, "annual_income")
+    credit_score = from_db(credit_score, "credit_score")
+    current_annual_repayment = from_db(current_annual_repayment, "current_annual_repayment")
+    has_payroll = from_db(has_payroll, "has_payroll")
+    auto_transfers = from_db(auto_transfers, "auto_transfers")
+    asset_amount = from_db(asset_amount, "asset_amount")
+    if job_years is None and job_months is None:
+        total_job_months = profile["job_months"] if profile is not None else 0
+    else:
+        total_job_months = (job_years or 0) * 12 + (job_months or 0)
+
+    missing = [label for value, label in [(annual_income, "연소득"), (credit_score, "신용점수")] if value is None]
     if product_type == "mortgage":
-        missing = [label for value, label in [(collateral_value, "담보 주택 가액"), (region, "지역 구분(투기과열지구/조정대상지역/일반지역)")] if not value]
-        if missing:
-            return f"[필수 정보 누락] 주택담보대출 심사에는 {', '.join(missing)}이(가) 필요합니다. 계산하지 말고 사용자에게 먼저 물어보세요."
+        missing += [label for value, label in [(collateral_value, "담보 주택 가액"), (region, "지역 구분(투기과열지구/조정대상지역/일반지역)")] if not value]
+    if missing:
+        return f"[필수 정보 누락] 심사에는 {', '.join(missing)}이(가) 필요합니다. 계산하지 말고 사용자에게 먼저 물어보세요."
 
     assumed = []
     def pick(value, default, label):
@@ -83,11 +121,12 @@ def loan_calculator(
     user_data = {
         "annual_income": annual_income,
         "credit_score": credit_score,
-        "current_annual_repayment": current_annual_repayment,
-        "job_months": job_years * 12 + job_months,
+        "current_annual_repayment": current_annual_repayment or 0,
+        "job_months": total_job_months,
         "has_payroll": payroll,
         "auto_transfers": transfers,
-        "asset_amount": assets
+        "asset_amount": assets,
+        "unresolved_delinquency": profile["unresolved_delinquency"]["count"] if profile is not None else 0
     }
     loan_request = {
         "amount": loan_amount,
@@ -108,6 +147,11 @@ def loan_calculator(
     try:
         result = engine.run_simulation(user_data, loan_request, user_role)
         result["applied_conditions"] = {
+            "고객 정보 출처": f"고객 DB ({profile['customer_id']} {profile['name']})" if profile is not None else "사용자 입력",
+            "연소득": f"{annual_income:,}원",
+            "신용점수": f"{credit_score}점",
+            "기존 대출 연 상환액": f"{user_data['current_annual_repayment']:,}원",
+            "재직 기간": f"{total_job_months // 12}년 {total_job_months % 12}개월",
             "금리": f"{rate}%",
             "대출 기간": f"{term}년",
             "스트레스 금리 상승폭": f"+{stress}%p",
@@ -116,11 +160,25 @@ def loan_calculator(
             "보유 자산": f"{assets:,}원",
             "기본값 적용 항목": assumed or "없음",
         }
+        if profile is not None:
+            result["applied_conditions"]["미해결 연체"] = f"{profile['unresolved_delinquency']['count']}건"
         if product_type == "mortgage":
             result["applied_conditions"]["담보 주택 가액"] = f"{collateral_value:,}원"
         return result
     except Exception as e:
         return f"계산 중 오류 발생: {str(e)}"
+
+
+#Tool3. 고객 조회
+@tool("customer_lookup")
+def customer_lookup(customer_id: str):
+    """
+    고객 ID(예: C2025_001)로 고객 DB에서 고객 정보, 기존 대출, 미해결 연체 이력을 조회합니다.
+    '이 고객 정보 보여줘', '기존 대출 뭐 있어?' 같은 조회 질문에 사용하세요. 심사 계산은 loan_calculator에 customer_id를 넣어 하세요.
+    """
+    profile, error = load_customer(customer_id)
+    return error or profile
+
 
 #Tool2. 규정 검색기
 @tool("regulatory_search")
@@ -142,4 +200,4 @@ def regulatory_search(query: str):
 
     return "\n\n---\n\n".join(formatted_results)
 
-tools = [loan_calculator, regulatory_search]
+tools = [loan_calculator, regulatory_search, customer_lookup]

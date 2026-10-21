@@ -225,3 +225,16 @@ def test_mortgage_requires_collateral(engine):
 
 def test_non_mortgage_has_no_ltv(engine):
     assert "ltv" not in engine.run_simulation(make_user(), make_request())
+
+
+# --- 제4장 4항: 미해결 연체 ---
+
+def test_unresolved_delinquency_rejected(engine):
+    auth = engine.determine_approval_authority(30000000, 1, 0.1, "mortgage", unresolved_delinquency=1)
+    assert auth["level"] == 99
+    assert "미해결 연체 1건" in auth["type"]
+
+
+def test_run_simulation_passes_delinquency(engine):
+    result = engine.run_simulation(make_user(unresolved_delinquency=2), make_request())
+    assert "미해결 연체 2건" in result["required_authority"]

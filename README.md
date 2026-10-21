@@ -26,7 +26,7 @@
 
 **Deterministic Engine(심사 엔진)** + **RAG(Vector DB 기반 검색)** 를 결합한 구조로 설계되었습니다.
 
-LIBO는 고객 소득·부채·신용·자산 데이터를 기반으로 실제 **CSS 등급·DSR·대출 한도·LTV** 계산을 수행하며,  
+LIBO는 고객 DB(Oracle)의 소득·부채·신용·자산·연체 데이터를 기반으로 실제 **CSS 등급·DSR·대출 한도·LTV** 계산을 수행하며,  
 내규 기반 **전결 권한(자동 승인/영업점장/본부/거절)** 여부까지 판정합니다.
 
 📄 기능 상세: [docs/features.md](docs/features.md)
@@ -50,6 +50,11 @@ LIBO는 고객 소득·부채·신용·자산 데이터를 기반으로 실제 *
 ### 🔹 2. Stress Test 기능
 - 금리가 오른 상황(기본 +2%p, "3% 오르면?"처럼 원하는 폭 지정 가능)의 DSR을 다시 계산
 - 내부심사규정 기준(DSR 50%)을 넘으면 금리 상승 리스크로 경고
+
+### 🔹 3. 고객 DB 연동 (Oracle)
+- 고객 ID만으로 소득·신용점수·재직 기간·자산·거래 실적·기존 대출·연체 이력을 불러와 심사
+- 기존 대출은 잔액·금리·남은 기간으로 연 상환액을 계산해 DSR에 반영
+- 미해결 연체가 있으면 거절
 
 ---
 
@@ -84,9 +89,26 @@ LIBO는 고객 소득·부채·신용·자산 데이터를 기반으로 실제 *
   "그 상황에서 금리가 3% 오르면 어떻게 돼?"  
   → 스트레스 DSR 53.22%, 금리 상승 시 DSR 50% 초과 위험
 
+### 3️⃣ 고객 DB 기반 심사 (Oracle)
+> 고객 ID를 말하면 고객 정보를 묻지 않고 DB 값으로 계산합니다. 데모 고객 `C2025_001`~`C2025_004`는 위 2️⃣의 시나리오와 같은 조건입니다.
+- "C2025_001 고객 직장인 신용대출 1억, 금리 5%, 5년 심사해줘"  
+  → 2등급, 기존 대출 연 상환액 547만 원 반영, DSR 35.15%, 영업점장 전결
+- "C2025_004 고객 주택담보대출 4억, 금리 4%, 30년. 담보는 시가 8억 일반지역"  
+  → 3등급, DSR 38.19%, LTV 50%, 본부 심사
+- "C2025_008 고객 정보랑 연체 이력 보여줘" → 고객 정보·기존 대출·미해결 연체 조회
+- "C2025_008 고객 신용대출 1천만 원 가능해?" → 미해결 연체로 거절
+
 ---
 
 ## ⚙️ 실행 방법 (Getting Started)
+
+### 고객 DB (Oracle XE, Docker)
+`backend/.env`에 `DB_*`, `ORACLE_SYS_PASSWORD`를 먼저 설정합니다 (`backend/.env.example` 참고).
+
+```bash
+docker compose --env-file backend/.env up -d oracle    # 첫 실행은 초기화에 몇 분 걸림
+backend/venv/Scripts/python scripts/init_data.py       # 테이블 생성 + 데모·랜덤 고객 100명 (다시 실행하면 초기화)
+```
 
 ### Backend
 Python 3.11 권장 (Windows에서는 `chroma-hnswlib`에 3.12용 빌드 파일이 없음)
@@ -168,6 +190,7 @@ npm run dev
 | **Backend** | FastAPI, Python 3.11, pytest |
 | **AI / LLM** | LangChain, Google Gemini / OpenAI (`LLM_PROVIDER`로 선택) |
 | **Vector DB** | ChromaDB |
+| **Database** | Oracle XE 21c (Docker), python-oracledb |
 | **Infra** | Docker, AWS EC2, AWS S3 |
 
 ---
@@ -196,7 +219,6 @@ npm run dev
 ---
 
 ## 🖥️ 향후 개발 예정 (TODO)
-- [ ] Oracle 고객 DB 연동
 - [ ] 심사 입력값 누락 시 입력 폼
 - [ ] RAG 성능 평가와 품질 개선
 - [ ] LLM 캐싱
