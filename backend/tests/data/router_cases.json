@@ -1,0 +1,35 @@
+[
+  {"message": "신용대출 1억 가능해?", "intent": "review"},
+  {"message": "연봉 6천, 신용 850점, 재직 1년 직장인이야. 기존 대출 없고 직장인 신용대출 3천만 원 가능해?", "intent": "review"},
+  {"message": "연봉 8천, 신용 900점, 재직 3년 6개월 직장인이야. 기존 상환 연 500만 원, 금리 5%, 5년으로 신용대출 1억 가능해?", "intent": "review"},
+  {"message": "C2025_001 고객 직장인 신용대출 1억, 금리 5%, 5년 심사해줘", "intent": "review"},
+  {"message": "C2025_004 고객 주택담보대출 4억, 금리 4%, 30년. 담보는 시가 8억 일반지역", "intent": "review"},
+  {"message": "연봉 6천인데 주택담보대출 3억 받을 수 있어?", "intent": "review"},
+  {"message": "이 고객한테 5천만 원 빌려줘도 돼? 연소득 4천, 신용점수 720점", "intent": "review"},
+  {"message": "C2025_002 고객 3천만 원 대출 한도 안에 들어와?", "intent": "review"},
+  {"message": "새희망홀씨로 2천만 원 신청하면 승인돼? 연봉 2500만 원, 신용 600점", "intent": "review"},
+  {"message": "디디 직장인대출 최대한도 알려줘", "intent": "regulation"},
+  {"message": "투기과열지구 주담대 LTV 얼마야?", "intent": "regulation"},
+  {"message": "새희망홀씨 대출 대상이 누구야?", "intent": "regulation"},
+  {"message": "자동차담보대출 중도상환수수료 얼마야?", "intent": "regulation"},
+  {"message": "내부등급 몇 등급부터 본부 심사야?", "intent": "regulation"},
+  {"message": "대출 금액이 얼마를 넘으면 본부 심사로 넘어가?", "intent": "regulation"},
+  {"message": "DSR 규제 기준이 몇 퍼센트야?", "intent": "regulation"},
+  {"message": "연체 이력 있으면 대출 안 돼?", "intent": "regulation"},
+  {"message": "C2025_008 고객 정보랑 연체 이력 보여줘", "intent": "lookup"},
+  {"message": "C2025_001 고객은 기존 대출이 뭐 있어?", "intent": "lookup"},
+  {"message": "C2025_003 고객 재직 기간이 얼마나 돼?", "intent": "lookup"},
+  {"message": "그 상황에서 금리가 3% 오르면 어떻게 돼?", "intent": "what_if", "history": [
+    {"role": "user", "content": "C2025_004 고객 주택담보대출 4억, 금리 4%, 30년. 담보는 시가 8억 일반지역"},
+    {"role": "assistant", "content": "심사 결과: 본부 심사 필수 (2억 초과), DSR 38.19%"}]},
+  {"message": "기간을 10년으로 바꾸면?", "intent": "what_if", "history": [
+    {"role": "user", "content": "C2025_001 고객 직장인 신용대출 1억, 금리 5%, 5년 심사해줘"},
+    {"role": "assistant", "content": "심사 결과: 영업점장 전결, DSR 35.15%"}]},
+  {"message": "2억이면 어떻게 돼?", "intent": "what_if", "history": [
+    {"role": "user", "content": "C2025_001 고객 직장인 신용대출 1억, 금리 5%, 5년 심사해줘"},
+    {"role": "assistant", "content": "심사 결과: 영업점장 전결, DSR 35.15%"}]},
+  {"message": "안녕하세요", "intent": "other"},
+  {"message": "너는 어떤 걸 도와줄 수 있어?", "intent": "other"},
+  {"message": "C2025_001 고객 1억 가능한지랑 중도상환수수료도 알려줘", "intent": "other"},
+  {"message": "오늘 점심 뭐 먹지?", "intent": "other"}
+]

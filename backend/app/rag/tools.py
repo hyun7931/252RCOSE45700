@@ -197,8 +197,18 @@ def regulatory_search(query: str):
     디디은행의 대출 상품 정보, 규정, 약관 등을 검색합니다.
     '직장인 대출 조건이 뭐야?', '중도상환수수료 얼마야?' 같은 질문에 사용하세요.
     """
-    docs = retriever.invoke(query)
-    
+    return search_regulations([query])
+
+
+def search_regulations(queries):
+    """여러 질의로 검색해 중복을 뺀 결과를 출처와 함께 반환 (라우터 규정 경로는 원 질문 + 검색어로 검색)"""
+    docs, seen = [], set()
+    for query in dict.fromkeys(q for q in queries if q):
+        for doc in retriever.invoke(query):
+            if doc.page_content not in seen:
+                seen.add(doc.page_content)
+                docs.append(doc)
+
     if not docs:
         return "관련된 규정이나 상품 정보를 찾을 수 없습니다."
 

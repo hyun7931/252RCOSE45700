@@ -9,14 +9,15 @@ import os
 load_dotenv()
 
 from app.rag.form import build_form, form_prompt
-from app.rag.result_summary import render_summary, check_commentary, is_calculation_result
+from app.rag.result_summary import render_summary, check_commentary, is_calculation_result, render_customer
+from app.rag.router import rule_route, llm_route, calculator_inputs, extract_customer_id
 
 try:
-    from app.rag.tools import tools, loan_calculator
+    from app.rag.tools import tools, loan_calculator, customer_lookup, search_regulations
 except ImportError:
     print("경고 : Tools를 찾을 수 없습니다.")
     tools = []
-    loan_calculator = None
+    loan_calculator = customer_lookup = search_regulations = None
 
 llm = get_chat_model()
 
@@ -145,3 +146,67 @@ def get_form_response(form_values: dict, chat_history: list):
         return {"response": result, "form": None}
 
     return {"response": summarize_with_commentary(result, values, chat_history), "form": None}
+
+
+# ---------------------------------------------------------------------------
+# 명시적 라우팅 (#17): 규칙 → LLM 구조화 출력 → 경로별 파이프라인, 애매하면 에이전트
+# ---------------------------------------------------------------------------
+
+def answer_review(inputs, chat_history):
+    """심사 계산 경로: 계산기(코드) → 빠진 값이면 입력 폼, 결과면 표 + 해설"""
+    result = loan_calculator.invoke(inputs)
+    form = build_form(result, inputs)
+    if form is not None:
+        return {"response": form_prompt(form["missing"]), "form": form}
+    if not is_calculation_result(result):
+        return {"response": result, "form": None}  # [고객 없음], [DB 연결 실패] 등
+    return {"response": summarize_with_commentary(result, inputs, chat_history), "form": None}
+
+
+def answer_regulation(message, query, chat_history):
+    """규정 검색 경로: 벡터 검색(코드) → LLM 답변"""
+    context = search_regulations([message, query])
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        *format_history(chat_history),
+        HumanMessage(content=(
+            f"[질문]\n{message}\n\n[규정·상품 검색 결과]\n{context}\n\n"
+            "검색 결과에 있는 내용만 근거로 답하세요. 검색 결과에 없으면 확인되지 않는다고 답하세요. "
+            "답변 끝에 근거 문서를 [출처: 파일명] 형식으로 붙이세요."
+        )),
+    ]
+    return {"response": llm.invoke(messages).content, "form": None}
+
+
+def answer_lookup(customer_id):
+    """고객 조회 경로: DB 조회(코드) → 표 (LLM 없음)"""
+    profile = customer_lookup.invoke({"customer_id": customer_id})
+    if isinstance(profile, str):
+        return {"response": profile, "form": None}
+    return {"response": render_customer(profile), "form": None}
+
+
+def route_message(user_input: str, chat_history: list):
+    """채팅 진입점. 응답에 route(경로)를 함께 담아 로그·평가에 사용"""
+    route = rule_route(user_input)
+    if route == "lookup":
+        return {**answer_lookup(extract_customer_id(user_input)), "route": "rule:lookup"}
+
+    try:
+        decision = llm_route(llm, user_input, chat_history)
+    except Exception as e:
+        print(f"라우터 오류, 에이전트로 처리: {e}")
+        return {**get_chatbot_response(user_input, chat_history), "route": "agent:router_error"}
+
+    try:
+        if decision.intent == "review":
+            return {**answer_review(calculator_inputs(decision), chat_history), "route": "llm:review"}
+        if decision.intent == "regulation":
+            return {**answer_regulation(user_input, decision.search_query, chat_history), "route": "llm:regulation"}
+        if decision.intent == "lookup" and (decision.customer_id or extract_customer_id(user_input)):
+            return {**answer_lookup((decision.customer_id or extract_customer_id(user_input)).upper()), "route": "llm:lookup"}
+    except Exception as e:
+        print(f"{decision.intent} 경로 오류, 에이전트로 처리: {e}")
+
+    # what_if(후속 질문, #18에서 계산 경로로 이전), other, 섞인 질문 → 기존 에이전트
+    return {**get_chatbot_response(user_input, chat_history), "route": f"agent:{decision.intent}"}
