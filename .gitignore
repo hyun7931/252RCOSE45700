@@ -37,3 +37,4 @@ build/
 backend/data/chromadb_storage/
 *.bin
 *.sqlite3
+backend/data/embedding_cache/

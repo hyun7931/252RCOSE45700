@@ -1,17 +1,19 @@
 # backend/app/rag/vector_store.py
 
 import os
+import re
 import shutil
 import time
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from app.llm_provider import get_embeddings
+from app.llm_provider import get_embeddings, embedding_model_id
 from langchain_core.documents import Document
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, "data", "regulations")
 DB_PATH = os.path.join(BASE_DIR, "data", "chromadb_storage")
+EMBEDDING_CACHE_PATH = os.path.join(BASE_DIR, "data", "embedding_cache")
 
 def load_documents():
     docs = []
@@ -52,6 +54,16 @@ def load_documents():
 
     return docs
 
+def cached_document_embeddings():
+    """문서 임베딩 캐시: 벡터 DB를 다시 만들 때 바뀌지 않은 조각은 API를 다시 부르지 않음.
+    namespace에 임베딩 모델을 넣어 provider·모델이 바뀌면 캐시를 따로 씀"""
+    from langchain.embeddings import CacheBackedEmbeddings
+    from langchain.storage import LocalFileStore
+    namespace = re.sub(r"[^A-Za-z0-9._-]", "_", embedding_model_id())  # 파일 저장소 키에 쓸 수 있는 문자만
+    return CacheBackedEmbeddings.from_bytes_store(
+        get_embeddings(), LocalFileStore(EMBEDDING_CACHE_PATH), namespace=namespace)
+
+
 def init_vector_db(reset=True):
     if reset and os.path.exists(DB_PATH):
         print("기존 벡터 DB 삭제")
@@ -76,7 +88,7 @@ def init_vector_db(reset=True):
     batch_delay = float(os.getenv("EMBED_BATCH_DELAY", "60"))
 
     vector_db = Chroma(
-        embedding_function=get_embeddings(),
+        embedding_function=cached_document_embeddings(),
         persist_directory=DB_PATH
     )
     for start in range(0, len(splits), batch_size):

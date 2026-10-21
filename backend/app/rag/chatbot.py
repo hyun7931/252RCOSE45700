@@ -1,7 +1,8 @@
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from app.llm_provider import get_chat_model
+from app.llm_provider import get_chat_model, chat_model_id
+from app import llm_cache
 from dotenv import load_dotenv
 import json
 import os
@@ -10,7 +11,10 @@ load_dotenv()
 
 from app.rag.form import build_form, form_prompt
 from app.rag.result_summary import render_summary, check_commentary, is_calculation_result, render_customer
-from app.rag.router import rule_route, llm_route, calculator_inputs, extract_customer_id, merge_inputs
+from app.rag.router import rule_route, llm_route, calculator_inputs, extract_customer_id, merge_inputs, \
+    history_text, RouteDecision, ROUTER_INSTRUCTION
+import app.logic.loan_engine as loan_engine_module
+import inspect
 
 try:
     from app.rag.tools import tools, loan_calculator, customer_lookup, search_regulations
@@ -95,13 +99,28 @@ def get_chatbot_response(user_input: str, chat_history: list):
     return {"response": response["output"], "form": form}
 
 
+COMMENTARY_INSTRUCTION = (
+    "심사 엔진(loan_calculator)이 아래 결과를 계산했습니다. 수치와 판정은 화면에 표로 따로 표시되므로 "
+    "수치를 다시 나열하지 말고, 판정 이유·주의할 점·다음 조치만 3~5문장으로 설명하세요. "
+    "판정을 바꾸거나 과장하지 말고, 권한 부족·본부 심사·거절이면 '대출 가능합니다'처럼 단정하지 마세요. "
+    "끝에 [출처: 내부 심사 엔진 결과]를 붙이세요."
+)
+REGULATION_INSTRUCTION = (
+    "검색 결과에 있는 내용만 근거로 답하세요. 검색 결과에 없으면 확인되지 않는다고 답하세요. "
+    "답변 끝에 근거 문서를 [출처: 파일명] 형식으로 붙이세요."
+)
+
+# 캐시 키 구성 요소: 프롬프트·엔진 코드가 바뀌면 키가 달라져 예전 캐시를 쓰지 않음
+ENGINE_VERSION = llm_cache.text_hash(inspect.getsource(loan_engine_module))
+COMMENTARY_PROMPT = llm_cache.text_hash(SYSTEM_PROMPT + COMMENTARY_INSTRUCTION)
+REGULATION_PROMPT = llm_cache.text_hash(SYSTEM_PROMPT + REGULATION_INSTRUCTION)
+ROUTER_PROMPT = llm_cache.text_hash(ROUTER_INSTRUCTION + json.dumps(RouteDecision.model_json_schema(), ensure_ascii=False, sort_keys=True))
+
+
 def generate_commentary(result, inputs, chat_history, feedback=None):
     """엔진 결과에 대한 LLM 해설 (수치 나열 없이 판정 이유·주의사항·다음 조치)"""
     instruction = (
-        "심사 엔진(loan_calculator)이 아래 결과를 계산했습니다. 수치와 판정은 화면에 표로 따로 표시되므로 "
-        "수치를 다시 나열하지 말고, 판정 이유·주의할 점·다음 조치만 3~5문장으로 설명하세요. "
-        "판정을 바꾸거나 과장하지 말고, 권한 부족·본부 심사·거절이면 '대출 가능합니다'처럼 단정하지 마세요. "
-        "끝에 [출처: 내부 심사 엔진 결과]를 붙이세요.\n\n"
+        COMMENTARY_INSTRUCTION + "\n\n"
         f"[입력 조건]\n{json.dumps(inputs or {}, ensure_ascii=False, default=str)}\n\n"
         f"[심사 엔진 결과]\n{json.dumps(result, ensure_ascii=False, default=str)}"
     )
@@ -112,8 +131,17 @@ def generate_commentary(result, inputs, chat_history, feedback=None):
 
 
 def summarize_with_commentary(result, inputs, chat_history, draft=None):
-    """표(코드) + 해설(LLM). 해설이 판정과 모순되면 1회 재생성, 그래도 실패하면 표만"""
+    """표(코드) + 해설(LLM). 해설이 판정과 모순되면 1회 재생성, 그래도 실패하면 표만.
+    해설은 엔진 결과 전체(DB 값·재직 기간·기본값이 담긴 applied_conditions 포함)를 키로 캐시"""
     table = render_summary(result)
+    cache_key = llm_cache.make_key("commentary", {
+        "result": result, "engine": ENGINE_VERSION, "prompt": COMMENTARY_PROMPT, "model": chat_model_id()})
+    cached = llm_cache.get(cache_key)
+    if cached is not None:
+        llm_cache.record("commentary", True)
+        return f"{table}\n\n{cached}"
+    llm_cache.record("commentary", False)
+
     try:
         commentary = draft if draft is not None else generate_commentary(result, inputs, chat_history)
         problems = check_commentary(commentary, result)
@@ -128,11 +156,17 @@ def summarize_with_commentary(result, inputs, chat_history, draft=None):
     if problems:
         print(f"해설 검증 재실패, 표만 표시: {problems}")
         return f"{table}\n\n위 표의 판정과 수치를 기준으로 검토해 주세요.\n\n[출처: 내부 심사 엔진 결과]"
+    llm_cache.put(cache_key, commentary)  # 검증을 통과한 해설만 저장
     return f"{table}\n\n{commentary}"
 
 
 def get_form_response(form_values: dict, chat_history: list):
     """입력 폼 제출. 계산은 심사 엔진이 직접 하고, LLM은 결과 설명만 함"""
+    llm_cache.start_request()
+    return {**_form_response(form_values, chat_history), "cache": llm_cache.request_stats()}
+
+
+def _form_response(form_values: dict, chat_history: list):
     values = {k: v for k, v in form_values.items() if v is not None and v != ""}
     try:
         result = loan_calculator.invoke(values)
@@ -170,13 +204,14 @@ def answer_regulation(message, query, chat_history):
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         *format_history(chat_history),
-        HumanMessage(content=(
-            f"[질문]\n{message}\n\n[규정·상품 검색 결과]\n{context}\n\n"
-            "검색 결과에 있는 내용만 근거로 답하세요. 검색 결과에 없으면 확인되지 않는다고 답하세요. "
-            "답변 끝에 근거 문서를 [출처: 파일명] 형식으로 붙이세요."
-        )),
+        HumanMessage(content=f"[질문]\n{message}\n\n[규정·상품 검색 결과]\n{context}\n\n{REGULATION_INSTRUCTION}"),
     ]
-    return {"response": llm.invoke(messages).content, "form": None}
+    # 키: 질문 + 실제 검색된 문서 조각 (벡터 DB를 다시 만들어 검색 결과가 바뀌면 새로 생성)
+    answer = llm_cache.cached_call("regulation", {
+        "question": " ".join(message.split()), "context": llm_cache.text_hash(context),
+        "prompt": REGULATION_PROMPT, "model": chat_model_id()},
+        lambda: llm.invoke(messages).content)
+    return {"response": answer, "form": None}
 
 
 def answer_lookup(customer_id):
@@ -190,12 +225,26 @@ def answer_lookup(customer_id):
 def route_message(user_input: str, chat_history: list, last_inputs: dict = None):
     """채팅 진입점. 응답에 route(경로)를 함께 담아 로그·평가에 사용.
     last_inputs: 프론트가 보관하던 직전 계산 조건 (후속 질문 재계산용)"""
+    llm_cache.start_request()
+    return {**_route_message(user_input, chat_history, last_inputs), "cache": llm_cache.request_stats()}
+
+
+def cached_route(user_input, chat_history):
+    """라우터 판단 캐시. 키: 질문 + 최근 대화 (첫 질문·추천 카드 질문에서 주로 적중)"""
+    decision = llm_cache.cached_call("router", {
+        "message": " ".join(user_input.split()), "history": history_text(chat_history),
+        "prompt": ROUTER_PROMPT, "model": chat_model_id()},
+        lambda: llm_route(llm, user_input, chat_history).model_dump())
+    return RouteDecision(**decision)
+
+
+def _route_message(user_input, chat_history, last_inputs):
     route = rule_route(user_input)
     if route == "lookup":
         return {**answer_lookup(extract_customer_id(user_input)), "route": "rule:lookup"}
 
     try:
-        decision = llm_route(llm, user_input, chat_history)
+        decision = cached_route(user_input, chat_history)
     except Exception as e:
         print(f"라우터 오류, 에이전트로 처리: {e}")
         return {**get_chatbot_response(user_input, chat_history), "route": "agent:router_error"}
