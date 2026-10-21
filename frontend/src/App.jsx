@@ -24,6 +24,8 @@ const OPEN_FORM_MESSAGE = "아래 입력 폼에 심사할 조건을 입력해 �
 function App() {
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
+  // 직전 계산 조건: 서버가 돌려준 값을 보관했다가 다음 요청에 보냄 (후속 질문 재계산, 폼 미리 채우기)
+  const [lastInputs, setLastInputs] = useState(null);
 
   const botMessage = (text, form = null) => ({
     message: text,
@@ -48,8 +50,10 @@ function App() {
       const response = await axios.post(`${API_BASE}/chat`, {
         message: message,
         history: historyPayload,
-        form_values: formValues
+        form_values: formValues,
+        last_inputs: lastInputs
       });
+      if (response.data.last_inputs) setLastInputs(response.data.last_inputs);
       setMessages([...newMessages, botMessage(response.data.response, response.data.form)]);
     } catch {
       setMessages([...newMessages, botMessage("⚠️ 서버 연결에 실패했습니다.")]);
@@ -66,7 +70,7 @@ function App() {
   };
 
   const openForm = () => {
-    setMessages([...messages, botMessage(OPEN_FORM_MESSAGE, { missing: [], prefilled: {} })]);
+    setMessages([...messages, botMessage(OPEN_FORM_MESSAGE, { missing: [], prefilled: lastInputs || {} })]);
   };
 
   const suggestionCards = [

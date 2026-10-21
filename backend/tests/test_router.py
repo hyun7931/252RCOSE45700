@@ -3,7 +3,7 @@
 
 import pytest
 
-from app.rag.router import rule_route, extract_customer_id, calculator_inputs, history_text, RouteDecision
+from app.rag.router import rule_route, extract_customer_id, calculator_inputs, history_text, merge_inputs, RouteDecision
 from app.rag.result_summary import render_customer
 
 
@@ -51,3 +51,28 @@ def test_render_customer():
     assert "재직 5년 2개월" in text
     assert "⚠️ 1건" in text
     assert "| L_008_1 | 직장인신용대출 | 15,300,000원 | 3.91% | 75개월 | 2,763,252원 |" in text
+
+
+# --- 후속 질문 조건 병합 (#18) ---
+
+LAST = {"customer_id": "C2025_004", "product_type": "mortgage", "loan_amount": 400000000,
+        "interest_rate": 4.0, "term_years": 30, "collateral_value": 800000000, "region": "normal"}
+
+
+def test_merge_overrides_only_new_values():
+    merged = merge_inputs(LAST, {"stress_rate_increase": 3.0})
+    assert merged == {**LAST, "stress_rate_increase": 3.0}
+    assert merge_inputs(LAST, {"loan_amount": 200000000, "term_years": None})["term_years"] == 30
+
+
+def test_merge_same_customer_keeps_conditions():
+    assert merge_inputs(LAST, {"customer_id": "c2025_004", "loan_amount": 1})["region"] == "normal"
+
+
+def test_merge_new_customer_drops_previous():
+    assert merge_inputs(LAST, {"customer_id": "C2025_001", "loan_amount": 100000000}) == {
+        "customer_id": "C2025_001", "loan_amount": 100000000}
+
+
+def test_merge_without_previous():
+    assert merge_inputs(None, {"loan_amount": 1}) == {"loan_amount": 1}

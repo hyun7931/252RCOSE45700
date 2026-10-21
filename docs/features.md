@@ -36,13 +36,32 @@ LIBO는 디디은행 여신 심사역을 돕는 챗봇입니다. 질문이 들�
 | `review` (심사 계산) | 추출한 값으로 `loan_calculator` 호출(코드) → 빠진 값이면 입력 폼, 결과면 표 + 해설 ([1-1](#1-1-심사-답변-형식-표코드--해설llm)) | 2회 |
 | `regulation` (규정 질문) | 원 질문과 라우터 검색어로 각각 벡터 검색해 합침(코드) → 검색 결과만 근거로 답변 | 2회 |
 | `lookup` (고객 조회) | Oracle 조회(코드) → 고객 정보·기존 대출·연체 표 (LLM 없음) | 규칙 0회 / LLM 라우터 1회 |
-| `what_if` (후속 질문), `other` (잡담·의도 섞임) | 기존 에이전트로 처리 (후속 질문은 #18에서 계산 경로로 옮길 예정) | 3회 안팎 |
+| `what_if` (후속 질문) | 직전 계산 조건(`last_inputs`)에 새로 말한 값만 덮어써 `review`와 같은 계산 경로로 재계산 ([1-0-1](#1-0-1-후속-질문-직전-조건-유지)) | 2회 |
+| `other` (잡담·의도 섞임), 직전 조건이 없는 후속 질문 | 기존 에이전트로 처리 | 3회 안팎 |
 
 - 라우터 오류나 경로 처리 오류가 나면 에이전트로 넘깁니다.
 - `/chat` 응답의 `route`에 처리 경로가 기록됩니다 (예: `rule:lookup`, `llm:review`, `agent:what_if`).
 - 평가: `backend/tests/data/router_cases.json`(27문항)을 `scripts/eval_router.py`로 실제 LLM에 분류시켜 정확도를 봅니다. 질문마다 LLM을 1회 호출하므로 무료 한도에 주의하세요.
 
-### 1-0-1. 에이전트 (분류되지 않은 질문)
+### 1-0-1. 후속 질문: 직전 조건 유지
+
+서버는 대화를 저장하지 않으므로, 직전 계산 조건을 프론트가 보관합니다.
+
+1. 계산에 성공하면 응답의 `last_inputs`에 그때 쓴 계산기 입력값이 담깁니다. 채팅, 입력 폼, 에이전트 경로 모두 해당합니다.
+2. 프론트는 이 값을 보관했다가 다음 `/chat` 요청에 `last_inputs`로 보냅니다.
+3. 라우터가 `what_if`로 분류하면, 직전 조건에 **바뀐 값만** 덮어써서 다시 계산합니다 (`router.py:merge_inputs`).
+   - "금리가 3% 오르면" → `stress_rate_increase=3`
+   - "금리를 6%로 바꾸면" → `interest_rate=6`
+   - "기간을 20년으로" → `term_years=20`
+   - "2억이면" → `loan_amount=200000000`
+4. 다른 고객 ID가 나오면 이전 조건을 버리고 새로 심사합니다. 새 심사(`review`)는 이전 조건을 쓰지 않습니다.
+5. `last_inputs`가 없으면(새로고침 등) 에이전트가 대화 기록을 보고 처리합니다.
+
+예: C2025_004 주담대 4억(4%, 30년) → "금리가 3% 오르면?"(스트레스 DSR 53.22%) → "기간을 20년으로 바꾸면?"(DSR 48.48%) → "2억이면?"(DSR 24.24%, 영업점장 전결). 바꾼 값 외의 조건은 그대로 유지됩니다.
+
+"직접 입력해서 심사" 폼도 `last_inputs`로 미리 채워집니다.
+
+### 1-0-2. 에이전트 (분류되지 않은 질문)
 
 
 - 위치: `backend/app/rag/chatbot.py`
@@ -314,6 +333,8 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 }
 ```
 
+직전 계산 조건이 있으면 `last_inputs`(이전 응답의 `last_inputs` 그대로)를 함께 보냅니다. 후속 질문 재계산에 씁니다.
+
 입력 폼 제출 시에는 `form_values`(계산기 입력값, 금액은 원 단위)를 함께 보냅니다. 이때 백엔드는 에이전트 대신 `loan_calculator`를 직접 호출하고, LLM은 결과 설명만 합니다.
 
 ```json
@@ -335,7 +356,8 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 ```
 
 - `response`는 마크다운 텍스트입니다.
-- `route`는 처리 경로입니다 (`rule:lookup`, `llm:review`, `llm:regulation`, `llm:lookup`, `agent:<의도>`). 입력 폼 제출 응답에는 없습니다.
+- `route`는 처리 경로입니다 (`rule:lookup`, `llm:review`, `llm:what_if`, `llm:regulation`, `llm:lookup`, `agent:<의도>`). 입력 폼 제출 응답에는 없습니다.
+- `last_inputs`는 계산에 성공했을 때만 있습니다. 그 계산에 쓴 계산기 입력값이고, 프론트가 보관했다가 다음 요청에 보냅니다.
 - `form`은 필수 정보가 빠졌을 때만 있고, 아니면 `null`입니다. `missing`은 빠진 항목 코드(`loan_amount`, `annual_income`, `credit_score`, `current_annual_repayment`, `job_tenure`, `collateral_value`, `region`), `prefilled`는 이미 받은 값입니다.
 
 ### `GET /customers/{customer_id}`

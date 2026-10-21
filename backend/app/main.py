@@ -22,12 +22,13 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     form_values: Optional[dict] = None  # 입력 폼 제출 시 심사 계산기 입력값
+    last_inputs: Optional[dict] = None  # 직전 계산 조건 (후속 질문 재계산용, 프론트가 보관)
 
 @app.post("/chat")
 def chat_endpoint(request: ChatRequest):
     if request.form_values is not None:
         return get_form_response(request.form_values, request.history)
-    return route_message(request.message, request.history)
+    return route_message(request.message, request.history, request.last_inputs)
 
 @app.get("/customers/{customer_id}")
 def customer_endpoint(customer_id: str):
