@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from app.rag.chatbot import get_chatbot_response, get_form_response
+from app.rag.chatbot import route_message, get_form_response
 from app.db.customer_repository import fetch_customer_profile, CustomerDBError
 import uvicorn
 
@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
 def chat_endpoint(request: ChatRequest):
     if request.form_values is not None:
         return get_form_response(request.form_values, request.history)
-    return get_chatbot_response(request.message, request.history)
+    return route_message(request.message, request.history)
 
 @app.get("/customers/{customer_id}")
 def customer_endpoint(customer_id: str):

@@ -47,7 +47,9 @@ Feature documentation (Korean) lives in `docs/features.md`; keep it in sync when
 
 ## Architecture
 
-Request flow: `frontend/src/App.jsx` → `POST /chat {message, history, form_values?}` → `backend/app/main.py` → `rag/chatbot.py:get_chatbot_response` → LangChain `AgentExecutor` → tools in `rag/tools.py` (`loan_calculator`, `regulatory_search`, `customer_lookup`).
+Request flow: `frontend/src/App.jsx` → `POST /chat {message, history, form_values?}` → `backend/app/main.py` → `rag/chatbot.py:route_message` → per-intent pipeline, or the LangChain `AgentExecutor` (`get_chatbot_response`) as fallback → tools in `rag/tools.py` (`loan_calculator`, `regulatory_search`, `customer_lookup`).
+
+- **Routing** (#17, `rag/router.py`): `rule_route` sends customer-ID lookups to `answer_lookup` with no LLM call; otherwise `llm_route` makes one structured-output call (`RouteDecision`: intent + calculator inputs in won). `review` → `answer_review` (calculator → form or table + commentary), `regulation` → `answer_regulation` (`search_regulations` over both the raw question and the router's query, then an answer grounded only in those results), `lookup` → `render_customer`. `what_if`/`other`/errors fall back to the agent; #18 will move `what_if` onto the calculator path. Responses carry `route` for debugging. Evaluate intent accuracy with `scripts/eval_router.py` against `tests/data/router_cases.json` (one LLM call per case).
 
 - **Stateless chat**: the frontend keeps the full conversation and sends it as `history: [{role: "user"|"assistant", content}]` on every request; the backend converts it to `HumanMessage`/`AIMessage`. No server-side session.
 - **System prompt** (`rag/chatbot.py`) defines the agent's behavior and requires a `[출처: ...]` citation at the end of every answer. For review requests the agent must call `loan_calculator` first even with partial inputs, rather than asking in prose; Gemini otherwise tends to skip the tool and ask directly, which suppresses the input form.

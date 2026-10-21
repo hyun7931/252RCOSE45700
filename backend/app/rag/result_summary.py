@@ -90,3 +90,33 @@ def check_commentary(text, result):
     if unknown:
         problems.append(f"엔진 결과에 없는 수치가 있습니다: {', '.join(p + '%' for p in unknown)}")
     return problems
+
+
+def render_customer(profile):
+    """고객 DB 조회 결과 → 마크다운 (LLM 없이 표시)"""
+    months = profile["job_months"]
+    lines = [
+        f"**고객 정보** {profile['name']} ({profile['customer_id']}) · 고객 DB 조회",
+        "",
+        "| 항목 | 내용 |",
+        "|------|------|",
+        f"| 직장 | {profile.get('company_name') or '-'} (재직 {months // 12}년 {months % 12}개월) |",
+        f"| 연소득 | {_won(profile['annual_income'])} |",
+        f"| 신용점수 | {profile['credit_score']}점 |",
+        f"| 보유 자산 | {_won(profile['asset_amount'])} |",
+        f"| 당행 거래 | 급여이체 {'있음' if profile['has_payroll'] else '없음'} · 자동이체 {profile['auto_transfers']}건 |",
+        f"| 기존 대출 연 상환액 | {_won(profile['current_annual_repayment'])} |",
+    ]
+    delinquency = profile["unresolved_delinquency"]
+    if delinquency["count"]:
+        lines.append(f"| 미해결 연체 | ⚠️ {delinquency['count']}건, {_won(delinquency['amount'])} (신규 여신 거절 대상) |")
+    else:
+        lines.append("| 미해결 연체 | 없음 |")
+
+    if profile["loans"]:
+        lines += ["", "**기존 대출**", "", "| 대출 ID | 상품 | 잔액 | 금리 | 남은 기간 | 연 상환액 |", "|------|------|------|------|------|------|"]
+        for loan in profile["loans"]:
+            lines.append(f"| {loan['loan_id']} | {loan['product_name']} | {loan['balance']:,}원 | {loan['interest_rate']}% "
+                         f"| {loan['remaining_months']}개월 | {loan['annual_repayment']:,}원 |")
+    lines += ["", "[출처: 고객 DB]"]
+    return "\n".join(lines)
