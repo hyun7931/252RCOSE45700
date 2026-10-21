@@ -13,7 +13,7 @@ LIBO는 디디은행 여신 심사역을 돕는 챗봇입니다. 질문이 들�
 1. [대화형 심사 보조 (Agent)](#1-대화형-심사-보조-agent)
 2. [여신 심사 엔진](#2-여신-심사-엔진-loan_calculator)
 3. [규정·상품 검색 (RAG)](#3-규정상품-검색-regulatory_search-rag)
-4. [LLM Provider 선택](#4-llm-provider-선택)
+4. [LLM Provider 선택 · 응답 캐시](#4-llm-provider-선택)
 5. [고객 DB](#5-고객-db-oracle)
 6. [채팅 화면](#6-채팅-화면-frontend)
 7. [API](#7-api)
@@ -256,6 +256,28 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 - 목록에 없는 값이면 사용 가능한 provider 목록과 함께 오류를 냅니다.
 - 새 provider는 `PROVIDERS`에 (채팅 모델, 임베딩) 생성 함수를 등록하면 추가됩니다.
 
+### 4-1. LLM 응답 캐시 (`backend/app/llm_cache.py`)
+
+같은 조건의 요청은 LLM을 다시 부르지 않고 저장된 답을 씁니다. Gemini 무료 등급 한도(분당 5회, 하루 20회) 대응이 주목적입니다.
+
+- **정확 일치 캐시만 씁니다.** 의미 캐시(문장이 비슷하면 같은 답)는 쓰지 않습니다. "1억 가능해?"와 "2억 가능해?"처럼 문장은 비슷하지만 결과가 다른 질문을 같은 것으로 볼 위험이 있기 때문입니다.
+- **키는 질문 문장이 아니라 실제 데이터로 만듭니다.**
+
+| 대상 | 캐시 키 | 효과 |
+|------|------|------|
+| 심사 해설 | 엔진 결과 전체(DB 값·재직 기간·기본값이 담긴 `applied_conditions` 포함) + 엔진 코드 해시 + 프롬프트 해시 + 모델 | 표현만 다른 같은 조건이면 적중. 금액·금리·직급·DB 값·재직 개월이 하나라도 다르면 새로 생성 |
+| 규정 답변 | 공백을 정리한 질문 + 검색된 문서 조각 해시 + 프롬프트 해시 + 모델 | 규정 문서를 고쳐 벡터 DB를 다시 만들면 검색 결과가 달라져 자동으로 새 답 |
+| 라우터 판단 | 질문 + 최근 대화 + 라우터 지시·출력 형식 해시 + 모델 | 첫 질문·추천 카드 질문에서 주로 적중 |
+| 문서 임베딩 | 문서 조각 해시 (임베딩 모델별로 분리) | 벡터 DB를 다시 만들 때 바뀌지 않은 조각은 API를 다시 부르지 않음 (`backend/data/embedding_cache/`) |
+
+- 계산은 캐시하지 않고 매번 엔진이 다시 합니다. 빠르고 비용이 없습니다.
+- 검증을 통과한 해설만 저장합니다. 오류가 났거나 대비책(표만 표시)으로 끝난 결과는 저장하지 않습니다.
+- 프롬프트나 엔진 코드를 고치면 해시가 바뀌어 예전 캐시를 쓰지 않습니다.
+- 저장 위치는 `backend/data/llm_cache.sqlite3`이고, git에는 올라가지 않습니다. `.env`의 `LLM_CACHE_ENABLED=false`로 끌 수 있고, `LLM_CACHE_PATH`로 위치를 바꿀 수 있습니다.
+- `/chat` 응답의 `cache`에 이번 요청의 캐시 적중 여부가 기록됩니다 (예: `{"router": true, "commentary": true}`).
+
+확인 결과 (OpenAI): 같은 질문 세 개를 두 번 보내면 2회차는 모두 적중해서 LLM 호출 0회, 응답 0.1~0.8초였습니다. 1회차에서도 표현만 다른 같은 조건("C2025_001 고객 대출 1억 되나요?")은 해설 캐시가 적중했고, 금액만 2억으로 바꾸면 새로 생성됐습니다.
+
 ## 5. 고객 DB (Oracle)
 
 - 위치: `backend/app/db/customer_repository.py` (조회), `backend/app/logic/customer_profile.py` (심사 입력값 변환)
@@ -356,6 +378,7 @@ LLM이 숫자를 직접 계산하지 않고, 규칙 기반 엔진(`LoanReviewEng
 ```
 
 - `response`는 마크다운 텍스트입니다.
+- `cache`는 이번 요청의 LLM 캐시 적중 여부입니다 (예: `{"router": true, "commentary": false}`). [4-1](#4-1-llm-응답-캐시-backendappllm_cachepy) 참고.
 - `route`는 처리 경로입니다 (`rule:lookup`, `llm:review`, `llm:what_if`, `llm:regulation`, `llm:lookup`, `agent:<의도>`). 입력 폼 제출 응답에는 없습니다.
 - `last_inputs`는 계산에 성공했을 때만 있습니다. 그 계산에 쓴 계산기 입력값이고, 프론트가 보관했다가 다음 요청에 보냅니다.
 - `form`은 필수 정보가 빠졌을 때만 있고, 아니면 `null`입니다. `missing`은 빠진 항목 코드(`loan_amount`, `annual_income`, `credit_score`, `current_annual_repayment`, `job_tenure`, `collateral_value`, `region`), `prefilled`는 이미 받은 값입니다.

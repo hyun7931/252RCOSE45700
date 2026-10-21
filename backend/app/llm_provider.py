@@ -56,3 +56,22 @@ def get_chat_model():
 
 def get_embeddings():
     return _get_factories(get_embedding_provider_name(), "EMBEDDING_PROVIDER")[1]()
+
+
+# 캐시 키용 모델 식별자 (provider:모델명)
+MODEL_NAMES = {
+    "openai": (("OPENAI_CHAT_MODEL", "gpt-4o-mini"), ("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")),
+    "gemini": (("GEMINI_CHAT_MODEL", "gemini-2.5-flash"), ("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")),
+}
+
+
+def chat_model_id():
+    name = get_provider_name()
+    env, default = MODEL_NAMES.get(name, ((None, "unknown"),) * 2)[0]
+    return f"{name}:{os.getenv(env, default) if env else default}"
+
+
+def embedding_model_id():
+    name = get_embedding_provider_name()
+    env, default = MODEL_NAMES.get(name, ((None, "unknown"),) * 2)[1]
+    return f"{name}:{os.getenv(env, default) if env else default}"
