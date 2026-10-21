@@ -50,6 +50,8 @@ ROUTER_INSTRUCTION = """당신은 디디은행 여신 심사 챗봇의 질문 �
 - 이전 대화에서 사용자가 말한 고객 조건도 같은 심사에 해당하면 함께 추출하세요.
 - 금액은 원 단위 정수로 바꾸세요. (1억 → 100000000, 6천(만 원) → 60000000, 500만 원 → 5000000)
 - "최대한도", "몇 등급부터", "얼마를 넘으면", "기준이 뭐야"처럼 일반 기준을 묻는 질문은 regulation입니다. 특정 고객·조건의 계산 요청만 review입니다.
+- what_if이면 직전 조건에서 **바뀐 값만** 넣으세요. "금리가 3% 오르면"은 stress_rate_increase=3, "금리를 6%로 바꾸면"은 interest_rate=6, "2억이면"은 loan_amount=200000000입니다.
+- 다른 고객 ID나 처음 보는 조건으로 새로 심사해 달라는 질문은 what_if가 아니라 review입니다.
 - 심사 요청과 규정 질문이 함께 있으면 other로 분류하세요."""
 
 
@@ -87,3 +89,13 @@ def llm_route(llm, message, chat_history):
     """LLM 구조화 출력 1회로 의도 + 입력값 추출"""
     prompt = f"{ROUTER_INSTRUCTION}\n\n[이전 대화]\n{history_text(chat_history) or '(없음)'}\n\n[마지막 사용자 질문]\n{message}"
     return llm.with_structured_output(RouteDecision).invoke(prompt)
+
+
+def merge_inputs(last_inputs, new_inputs):
+    """후속 질문: 직전 계산 조건에 새로 말한 값만 덮어씀. 다른 고객이면 이전 조건을 쓰지 않음"""
+    last = {k: v for k, v in (last_inputs or {}).items() if v is not None}
+    new = {k: v for k, v in (new_inputs or {}).items() if v is not None}
+    new_customer = new.get("customer_id")
+    if new_customer and new_customer.upper() != str(last.get("customer_id", "")).upper():
+        return new
+    return {**last, **new}

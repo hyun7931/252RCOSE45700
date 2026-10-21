@@ -10,7 +10,7 @@ load_dotenv()
 
 from app.rag.form import build_form, form_prompt
 from app.rag.result_summary import render_summary, check_commentary, is_calculation_result, render_customer
-from app.rag.router import rule_route, llm_route, calculator_inputs, extract_customer_id
+from app.rag.router import rule_route, llm_route, calculator_inputs, extract_customer_id, merge_inputs
 
 try:
     from app.rag.tools import tools, loan_calculator, customer_lookup, search_regulations
@@ -90,7 +90,8 @@ def get_chatbot_response(user_input: str, chat_history: list):
 
     if calc is not None:
         answer = summarize_with_commentary(calc, calc_inputs, chat_history, draft=response["output"])
-        return {"response": answer, "form": None}
+        last_inputs = {k: v for k, v in (calc_inputs or {}).items() if v is not None}
+        return {"response": answer, "form": None, "last_inputs": last_inputs}
     return {"response": response["output"], "form": form}
 
 
@@ -145,7 +146,7 @@ def get_form_response(form_values: dict, chat_history: list):
     if not is_calculation_result(result):
         return {"response": result, "form": None}
 
-    return {"response": summarize_with_commentary(result, values, chat_history), "form": None}
+    return {"response": summarize_with_commentary(result, values, chat_history), "form": None, "last_inputs": values}
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +161,7 @@ def answer_review(inputs, chat_history):
         return {"response": form_prompt(form["missing"]), "form": form}
     if not is_calculation_result(result):
         return {"response": result, "form": None}  # [고객 없음], [DB 연결 실패] 등
-    return {"response": summarize_with_commentary(result, inputs, chat_history), "form": None}
+    return {"response": summarize_with_commentary(result, inputs, chat_history), "form": None, "last_inputs": inputs}
 
 
 def answer_regulation(message, query, chat_history):
@@ -186,8 +187,9 @@ def answer_lookup(customer_id):
     return {"response": render_customer(profile), "form": None}
 
 
-def route_message(user_input: str, chat_history: list):
-    """채팅 진입점. 응답에 route(경로)를 함께 담아 로그·평가에 사용"""
+def route_message(user_input: str, chat_history: list, last_inputs: dict = None):
+    """채팅 진입점. 응답에 route(경로)를 함께 담아 로그·평가에 사용.
+    last_inputs: 프론트가 보관하던 직전 계산 조건 (후속 질문 재계산용)"""
     route = rule_route(user_input)
     if route == "lookup":
         return {**answer_lookup(extract_customer_id(user_input)), "route": "rule:lookup"}
@@ -199,6 +201,9 @@ def route_message(user_input: str, chat_history: list):
         return {**get_chatbot_response(user_input, chat_history), "route": "agent:router_error"}
 
     try:
+        if decision.intent == "what_if" and last_inputs:
+            merged = merge_inputs(last_inputs, calculator_inputs(decision))
+            return {**answer_review(merged, chat_history), "route": "llm:what_if"}
         if decision.intent == "review":
             return {**answer_review(calculator_inputs(decision), chat_history), "route": "llm:review"}
         if decision.intent == "regulation":
@@ -208,5 +213,5 @@ def route_message(user_input: str, chat_history: list):
     except Exception as e:
         print(f"{decision.intent} 경로 오류, 에이전트로 처리: {e}")
 
-    # what_if(후속 질문, #18에서 계산 경로로 이전), other, 섞인 질문 → 기존 에이전트
+    # 직전 조건이 없는 후속 질문(새로고침 등), other, 섞인 질문 → 기존 에이전트 (대화 기록으로 처리)
     return {**get_chatbot_response(user_input, chat_history), "route": f"agent:{decision.intent}"}
