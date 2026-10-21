@@ -124,13 +124,15 @@ class LoanReviewEngine:
             "max_loan": int(round(collateral_value * limit))
         }
 
-    def determine_approval_authority(self, loan_amount, grade, dsr, product_type="credit", job_months=0, credit_limit=None, ltv=None):
+    def determine_approval_authority(self, loan_amount, grade, dsr, product_type="credit", job_months=0, credit_limit=None, ltv=None, unresolved_delinquency=0):
         """
         [규정] 제3장 컷오프, 제4장: 전결 권한 판정 (권한 레벨 반환)
         Level 0: 자동승인 / Level 1: 지점장 / Level 2: 본부 / Level 99: 거절
         """
         #거절
         reject = []
+        if unresolved_delinquency > 0:
+            reject.append(f"미해결 연체 {unresolved_delinquency}건")
         if grade >= self.REJECT_GRADE:
             reject.append(f"내부등급 {grade}등급 (위험 구간)")
         if product_type != "policy" and dsr > self.DSR_LIMIT_REJECT:
@@ -214,7 +216,8 @@ class LoanReviewEngine:
             ltv = self.calculate_ltv(req_amt, loan_request['collateral_value'], loan_request['region'], loan_request.get('is_actual_demand', False))
 
         #판정 필요 레벨과 사용자
-        required_auth = self.determine_approval_authority(req_amt, css_result['grade'], dsr, prod_type, job_months, credit_limit, ltv)
+        required_auth = self.determine_approval_authority(req_amt, css_result['grade'], dsr, prod_type, job_months, credit_limit, ltv,
+                                                          user_data.get('unresolved_delinquency', 0))
         final_judgment = self.check_user_authority(required_auth, user_role)
 
         result = {

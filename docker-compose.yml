@@ -1,0 +1,23 @@
+# 로컬 개발용 Oracle XE
+# 실행: docker compose --env-file backend/.env up -d oracle
+services:
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: libo-oracle
+    ports:
+      - "${DB_PORT:-1521}:1521"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD:?backend/.env에 ORACLE_SYS_PASSWORD를 설정하세요}
+      APP_USER: ${DB_USER:?backend/.env에 DB_USER를 설정하세요}
+      APP_USER_PASSWORD: ${DB_PASSWORD:?backend/.env에 DB_PASSWORD를 설정하세요}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+volumes:
+  oracle-data:
